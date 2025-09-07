@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Background rectangle -->
+    <path
+        android:fillColor="#1a1a1a"
+        android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
+    
+    <!-- Gamepad outline -->
+    <path
+        android:fillColor="#00ff88"
+        android:pathData="M54,20 
+                         C42,20 32,30 32,42
+                         L32,66
+                         C32,78 42,88 54,88
+                         C66,88 76,78 76,66
+                         L76,42
+                         C76,30 66,20 54,20 Z" />
+    
+    <!-- D-pad -->
+    <path
+        android:fillColor="#ffffff"
+        android:pathData="M44,40 L48,40 L48,36 L52,36 L52,40 L56,40 L56,44 L52,44 L52,48 L48,48 L48,44 L44,44 Z" />
+    
+    <!-- Action buttons as circles using path -->
+    <path
+        android:fillColor="#ffffff"
+        android:pathData="M62,39 C64.76,39 67,41.24 67,44 C67,46.76 64.76,49 62,49 C59.24,49 57,46.76 57,44 C57,41.24 59.24,39 62,39 Z" />
+    <path
+        android:fillColor="#ffffff"
+        android:pathData="M68,45 C70.76,45 73,47.24 73,50 C73,52.76 70.76,55 68,55 C65.24,55 63,52.76 63,50 C63,47.24 65.24,45 68,45 Z" />
+    
+    <!-- Center logo "R" -->
+    <path
+        android:fillColor="#ffffff"
+        android:pathData="M50,58 L50,70 L52,70 L52,64 L54,64 L56,70 L58,70 L56,64
+                         C57,63 58,62 58,60 C58,58 56,58 54,58 L50,58 Z
+                         M52,60 L54,60 C55,60 56,59 56,60 C56,61 55,62 54,62 L52,62 L52,60 Z" />
+</vector>

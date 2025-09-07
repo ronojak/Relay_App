@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Internal storage -->
+    <files-path name="internal_files" path="." />
+    <cache-path name="cache_files" path="." />
+    
+    <!-- External storage for log exports -->
+    <external-files-path name="external_files" path="." />
+    <external-cache-path name="external_cache" path="." />
+    
+    <!-- Downloads directory for exported logs -->
+    <external-path name="external_storage_root" path="." />
+</paths>

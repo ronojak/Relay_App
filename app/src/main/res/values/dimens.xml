@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Standard spacing -->
+    <dimen name="spacing_xs">4dp</dimen>
+    <dimen name="spacing_sm">8dp</dimen>
+    <dimen name="spacing_md">16dp</dimen>
+    <dimen name="spacing_lg">24dp</dimen>
+    <dimen name="spacing_xl">32dp</dimen>
+    
+    <!-- Card dimensions -->
+    <dimen name="card_corner_radius">12dp</dimen>
+    <dimen name="card_elevation">4dp</dimen>
+    <dimen name="card_stroke_width">1dp</dimen>
+    
+    <!-- Button dimensions -->
+    <dimen name="button_corner_radius">8dp</dimen>
+    <dimen name="button_min_height">48dp</dimen>
+    
+    <!-- Status indicator -->
+    <dimen name="status_indicator_size">8dp</dimen>
+    
+    <!-- Gamepad visualizer -->
+    <dimen name="gamepad_button_size">24dp</dimen>
+    <dimen name="gamepad_stick_size">32dp</dimen>
+    
+    <!-- Minimum touch target -->
+    <dimen name="min_touch_target">48dp</dimen>
+</resources>

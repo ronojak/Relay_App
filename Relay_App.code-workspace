@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../wallet/input-relay-main"
+		}
+	],
+	"settings": {}
+}

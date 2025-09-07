@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    
+    <!-- Base Application Theme -->
+    <style name="Theme.RelayApp" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Status bar and navigation bar -->
+        <item name="android:statusBarColor">@color/background</item>
+        <item name="android:navigationBarColor">@color/background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        
+        <!-- Window attributes -->
+        <item name="android:windowBackground">@color/background</item>
+    </style>
+    
+    <!-- Base Text Style -->
+    <style name="TextAppearance">
+        <item name="android:textColor">@android:color/black</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+    
+    <style name="TextAppearance.RelayApp">
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:textSize">16sp</item>
+    </style>
+    
+    <!-- Text Styles -->
+    <style name="TextAppearance.RelayApp.Headline">
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textSize">24sp</item>
+    </style>
+    
+    <style name="TextAppearance.RelayApp.Title">
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textSize">20sp</item>
+    </style>
+    
+    <style name="TextAppearance.RelayApp.Body">
+        <item name="android:textColor">@color/on_surface_variant</item>
+        <item name="android:textSize">16sp</item>
+    </style>
+    
+    <style name="TextAppearance.RelayApp.Caption">
+        <item name="android:textColor">@color/on_surface_variant</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+    
+    <style name="TextAppearance.RelayApp.Monospace">
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+    
+    <!-- Status Indicator Styles -->
+    <style name="StatusIndicator">
+        <item name="android:layout_width">8dp</item>
+        <item name="android:layout_height">8dp</item>
+        <item name="android:layout_marginStart">8dp</item>
+    </style>
+    
+</resources>

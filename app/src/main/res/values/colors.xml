@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primary Brand Colors -->
+    <color name="primary">#1976D2</color>
+    <color name="primary_variant">#1565C0</color>
+    <color name="primary_dark">#0D47A1</color>
+    
+    <!-- Secondary Colors -->
+    <color name="secondary">#03DAC6</color>
+    <color name="secondary_variant">#018786</color>
+    
+    <!-- Surface and Background -->
+    <color name="background">#121212</color>
+    <color name="surface">#1E1E1E</color>
+    <color name="surface_variant">#2C2C2C</color>
+    
+    <!-- Text Colors -->
+    <color name="on_primary">#FFFFFF</color>
+    <color name="on_secondary">#000000</color>
+    <color name="on_background">#FFFFFF</color>
+    <color name="on_surface">#FFFFFF</color>
+    <color name="on_surface_variant">#AAAAAA</color>
+    
+    <!-- Status Colors -->
+    <color name="success">#4CAF50</color>
+    <color name="success_dark">#388E3C</color>
+    <color name="warning">#FF9800</color>
+    <color name="warning_dark">#F57C00</color>
+    <color name="error">#F44336</color>
+    <color name="error_dark">#D32F2F</color>
+    
+    <!-- Gaming Theme Colors -->
+    <color name="gaming_accent">#00E676</color>
+    <color name="gaming_accent_variant">#00C853</color>
+    <color name="tech_border">#333333</color>
+    <color name="tech_border_active">#00E676</color>
+    
+    <!-- Button Colors -->
+    <color name="button_pressed">#00E676</color>
+    <color name="button_unpressed">#424242</color>
+    <color name="trigger_active">#FF5722</color>
+    <color name="stick_active">#2196F3</color>
+    
+    <!-- Card and Component Colors -->
+    <color name="card_background">#1E1E1E</color>
+    <color name="card_stroke">#333333</color>
+    <color name="divider">#333333</color>
+    
+    <!-- Notification Colors -->
+    <color name="notification_accent">#1976D2</color>
+    
+    <!-- Material Design System Colors -->
+    <color name="md_theme_light_primary">#1976D2</color>
+    <color name="md_theme_light_on_primary">#FFFFFF</color>
+    <color name="md_theme_light_primary_container">#D1E4FF</color>
+    <color name="md_theme_light_on_primary_container">#001D36</color>
+    
+    <color name="md_theme_dark_primary">#A0CAFD</color>
+    <color name="md_theme_dark_on_primary">#003258</color>
+    <color name="md_theme_dark_primary_container">#00497D</color>
+    <color name="md_theme_dark_on_primary_container">#D1E4FF</color>
+    
+    <!-- Gamepad Visualization Colors -->
+    <color name="gamepad_body">#2C2C2C</color>
+    <color name="gamepad_button_face">#424242</color>
+    <color name="gamepad_dpad">#616161</color>
+    <color name="gamepad_stick_base">#424242</color>
+    <color name="gamepad_stick_knob">#757575</color>
+    <color name="gamepad_trigger">#616161</color>
+    
+    <!-- Connection Status Colors -->
+    <color name="status_connected">#4CAF50</color>
+    <color name="status_connecting">#FF9800</color>
+    <color name="status_disconnected">#9E9E9E</color>
+    <color name="status_error">#F44336</color>
+    
+    <!-- Transparent Colors -->
+    <color name="transparent">#00000000</color>
+    <color name="semi_transparent_black">#80000000</color>
+    <color name="semi_transparent_white">#80FFFFFF</color>
+    
+    <!-- Ripple Effects -->
+    <color name="ripple_light">#1AFFFFFF</color>
+    <color name="ripple_dark">#1A000000</color>
+</resources>

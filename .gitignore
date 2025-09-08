@@ -16,11 +16,11 @@
 local.properties
 
 # Gradle
-.gradle/
-gradlew
-gradlew.bat
-gradle-wrapper.jar
-gradle-wrapper.properties
+#.gradle/
+#gradlew
+#gradlew.bat
+#gradle-wrapper.jar
+#gradle-wrapper.properties
 
 # APK output
 *.apk

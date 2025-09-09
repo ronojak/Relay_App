@@ -169,8 +169,11 @@ class MainActivity : ComponentActivity() {
     
     // Handle gamepad input events
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Log ALL key events first to debug
+        Timber.i("🔑 KEY EVENT: action=${event.action}, keyCode=${event.keyCode}, source=0x${event.source.toString(16)}, deviceId=${event.deviceId}")
+        
         if (event.source and (android.view.InputDevice.SOURCE_GAMEPAD or android.view.InputDevice.SOURCE_JOYSTICK) != 0) {
-            Timber.d("MainActivity: Gamepad key event - action=${event.action}, keyCode=${event.keyCode}")
+            Timber.i("🎮 GAMEPAD KEY: action=${event.action}, keyCode=${event.keyCode}, deviceId=${event.deviceId}")
         }
         val handled = gamepadInputHandler.handleKeyEvent(event, event.deviceId)
         return handled || super.dispatchKeyEvent(event)

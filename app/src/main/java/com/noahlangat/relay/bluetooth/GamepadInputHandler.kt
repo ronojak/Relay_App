@@ -4,6 +4,9 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import com.noahlangat.relay.protocol.GamepadState
+import com.noahlangat.relay.ui.components.LogMessage
+import com.noahlangat.relay.ui.components.LogLevel
+import com.noahlangat.relay.ui.components.LogSource
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import timber.log.Timber
@@ -19,6 +22,12 @@ class GamepadInputHandler {
         extraBufferCapacity = 1
     )
     val gamepadStateFlow: SharedFlow<GamepadState> = _gamepadStateFlow
+    
+    private val _logMessageFlow = MutableSharedFlow<LogMessage>(
+        replay = 0,
+        extraBufferCapacity = 10
+    )
+    val logMessageFlow: SharedFlow<LogMessage> = _logMessageFlow
     
     private var currentState = GamepadState()
     private var lastStateTime = 0L
@@ -42,9 +51,10 @@ class GamepadInputHandler {
         
         val buttonBit = mapKeyCodeToButtonBit(event.keyCode) ?: return false
         val isPressed = event.action == KeyEvent.ACTION_DOWN
+        val buttonName = getButtonNameFromKeyCode(event.keyCode)
         
-        Timber.d("GamepadInputHandler: Key event - keyCode=${event.keyCode}, pressed=$isPressed")
-        updateButtonState(buttonBit, isPressed, deviceId)
+        Timber.d("GamepadInputHandler: Key event - keyCode=${event.keyCode} ($buttonName), pressed=$isPressed")
+        updateButtonState(buttonBit, isPressed, deviceId, buttonName)
         return true
     }
     
@@ -54,17 +64,29 @@ class GamepadInputHandler {
     fun handleMotionEvent(event: MotionEvent, deviceId: Int): Boolean {
         if (!isGamepadEvent(event)) return false
         
+        val leftStickX = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_X), stickDeadzone).toInt().toShort()
+        val leftStickY = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_Y), stickDeadzone).toInt().toShort()
+        val rightStickX = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_Z), stickDeadzone).toInt().toShort()
+        val rightStickY = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_RZ), stickDeadzone).toInt().toShort()
+        val leftTrigger = applyTriggerDeadzone(event.getAxisValue(MotionEvent.AXIS_LTRIGGER)).toInt().toShort()
+        val rightTrigger = applyTriggerDeadzone(event.getAxisValue(MotionEvent.AXIS_RTRIGGER)).toInt().toShort()
+        val dpadX = event.getAxisValue(MotionEvent.AXIS_HAT_X).toInt().toShort()
+        val dpadY = event.getAxisValue(MotionEvent.AXIS_HAT_Y).toInt().toShort()
+        
+        // Log significant motion changes
+        logMotionChanges(leftStickX, leftStickY, rightStickX, rightStickY, leftTrigger, rightTrigger, dpadX, dpadY, deviceId)
+        
         Timber.d("GamepadInputHandler: Motion event - deviceId=$deviceId")
         val newState = currentState.copy(
             deviceId = deviceId.toByte(),
-            leftStickX = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_X), stickDeadzone).toInt().toShort(),
-            leftStickY = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_Y), stickDeadzone).toInt().toShort(),
-            rightStickX = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_Z), stickDeadzone).toInt().toShort(),
-            rightStickY = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_RZ), stickDeadzone).toInt().toShort(),
-            leftTrigger = applyTriggerDeadzone(event.getAxisValue(MotionEvent.AXIS_LTRIGGER)).toInt().toShort(),
-            rightTrigger = applyTriggerDeadzone(event.getAxisValue(MotionEvent.AXIS_RTRIGGER)).toInt().toShort(),
-            dpadX = event.getAxisValue(MotionEvent.AXIS_HAT_X).toInt().toShort(),
-            dpadY = event.getAxisValue(MotionEvent.AXIS_HAT_Y).toInt().toShort(),
+            leftStickX = leftStickX,
+            leftStickY = leftStickY,
+            rightStickX = rightStickX,
+            rightStickY = rightStickY,
+            leftTrigger = leftTrigger,
+            rightTrigger = rightTrigger,
+            dpadX = dpadX,
+            dpadY = dpadY,
             timestamp = System.currentTimeMillis() * 1000 // Convert to microseconds
         )
         
@@ -85,7 +107,7 @@ class GamepadInputHandler {
         Timber.i("Gamepad disconnected, state reset: $deviceId")
     }
     
-    private fun updateButtonState(buttonBit: Int, isPressed: Boolean, deviceId: Int) {
+    private fun updateButtonState(buttonBit: Int, isPressed: Boolean, deviceId: Int, buttonName: String = "") {
         val currentButtons = currentState.buttons.toInt()
         val newButtons = if (isPressed) {
             currentButtons or (1 shl buttonBit)
@@ -101,7 +123,29 @@ class GamepadInputHandler {
         
         updateGamepadState(newState)
         
-        Timber.v("Button ${getButtonName(buttonBit)} ${if (isPressed) "pressed" else "released"}")
+        val displayName = buttonName.ifEmpty { getButtonName(buttonBit) }
+        val action = if (isPressed) "PRESSED" else "RELEASED"
+        val buttonBitmask = String.format("0x%04X", newButtons and 0xFFFF)
+        
+        Timber.i("🎮 GAMEPAD: $displayName $action (bit:$buttonBit, buttons:$buttonBitmask, device:$deviceId)")
+        
+        // Emit log message for UI
+        val logMessage = LogMessage(
+            message = "🎮 $displayName $action",
+            level = LogLevel.INFO,
+            deviceName = "Gamepad",
+            deviceId = deviceId,
+            source = LogSource.GAMEPAD
+        )
+        _logMessageFlow.tryEmit(logMessage)
+        
+        // Log all currently pressed buttons for debugging
+        if (isPressed) {
+            val pressedButtons = getActiveButtonNames(newButtons.toShort())
+            if (pressedButtons.isNotEmpty()) {
+                Timber.d("🎮 Active buttons: ${pressedButtons.joinToString(", ")}")
+            }
+        }
     }
     
     private fun updateGamepadState(newState: GamepadState) {
@@ -130,6 +174,9 @@ class GamepadInputHandler {
         _gamepadStateFlow.tryEmit(newState)
         
         Timber.v("Gamepad state updated and transmitted")
+        
+        // Log comprehensive state summary for debugging
+        logGamepadStateSummary(newState)
     }
     
     private fun hasSignificantChange(newState: GamepadState): Boolean {
@@ -205,28 +252,170 @@ class GamepadInputHandler {
             KeyEvent.KEYCODE_BUTTON_THUMBL -> GamepadState.BUTTON_L3
             KeyEvent.KEYCODE_BUTTON_THUMBR -> GamepadState.BUTTON_R3
             KeyEvent.KEYCODE_BUTTON_MODE -> GamepadState.BUTTON_PS
-            else -> null
+            // Handle D-pad as additional buttons if needed
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, 
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_CENTER -> null // Handle via motion events
+            else -> {
+                Timber.w("⚠️ Unknown gamepad key code: $keyCode (${getButtonNameFromKeyCode(keyCode)})")
+                null
+            }
         }
     }
     
     private fun getButtonName(buttonBit: Int): String {
         return when (buttonBit) {
-            GamepadState.BUTTON_CROSS -> "Cross"
-            GamepadState.BUTTON_CIRCLE -> "Circle"
-            GamepadState.BUTTON_SQUARE -> "Square"
-            GamepadState.BUTTON_TRIANGLE -> "Triangle"
-            GamepadState.BUTTON_L1 -> "L1"
-            GamepadState.BUTTON_R1 -> "R1"
-            GamepadState.BUTTON_L2 -> "L2"
-            GamepadState.BUTTON_R2 -> "R2"
-            GamepadState.BUTTON_SHARE -> "Share"
-            GamepadState.BUTTON_OPTIONS -> "Options"
-            GamepadState.BUTTON_L3 -> "L3"
-            GamepadState.BUTTON_R3 -> "R3"
-            GamepadState.BUTTON_PS -> "PS"
+            GamepadState.BUTTON_CROSS -> "Cross (X)"
+            GamepadState.BUTTON_CIRCLE -> "Circle (O)"
+            GamepadState.BUTTON_SQUARE -> "Square (□)"
+            GamepadState.BUTTON_TRIANGLE -> "Triangle (△)"
+            GamepadState.BUTTON_L1 -> "L1 (LB)"
+            GamepadState.BUTTON_R1 -> "R1 (RB)"
+            GamepadState.BUTTON_L2 -> "L2 (LT)"
+            GamepadState.BUTTON_R2 -> "R2 (RT)"
+            GamepadState.BUTTON_SHARE -> "Share (Back)"
+            GamepadState.BUTTON_OPTIONS -> "Options (Start)"
+            GamepadState.BUTTON_L3 -> "L3 (LS)"
+            GamepadState.BUTTON_R3 -> "R3 (RS)"
+            GamepadState.BUTTON_PS -> "PS (Home)"
             GamepadState.BUTTON_TOUCHPAD -> "Touchpad"
             GamepadState.BUTTON_MUTE -> "Mute"
             else -> "Unknown($buttonBit)"
+        }
+    }
+    
+    private fun getButtonNameFromKeyCode(keyCode: Int): String {
+        return when (keyCode) {
+            KeyEvent.KEYCODE_BUTTON_A -> "A/Cross"
+            KeyEvent.KEYCODE_BUTTON_B -> "B/Circle"
+            KeyEvent.KEYCODE_BUTTON_X -> "X/Square"
+            KeyEvent.KEYCODE_BUTTON_Y -> "Y/Triangle"
+            KeyEvent.KEYCODE_BUTTON_L1 -> "L1/LB"
+            KeyEvent.KEYCODE_BUTTON_R1 -> "R1/RB"
+            KeyEvent.KEYCODE_BUTTON_L2 -> "L2/LT"
+            KeyEvent.KEYCODE_BUTTON_R2 -> "R2/RT"
+            KeyEvent.KEYCODE_BUTTON_SELECT -> "Select/Share"
+            KeyEvent.KEYCODE_BUTTON_START -> "Start/Options"
+            KeyEvent.KEYCODE_BUTTON_THUMBL -> "L3/LS"
+            KeyEvent.KEYCODE_BUTTON_THUMBR -> "R3/RS"
+            KeyEvent.KEYCODE_BUTTON_MODE -> "Home/PS"
+            KeyEvent.KEYCODE_DPAD_UP -> "D-Pad Up"
+            KeyEvent.KEYCODE_DPAD_DOWN -> "D-Pad Down"
+            KeyEvent.KEYCODE_DPAD_LEFT -> "D-Pad Left"
+            KeyEvent.KEYCODE_DPAD_RIGHT -> "D-Pad Right"
+            KeyEvent.KEYCODE_DPAD_CENTER -> "D-Pad Center"
+            else -> "KeyCode_$keyCode"
+        }
+    }
+    
+    private fun getActiveButtonNames(buttonMask: Short): List<String> {
+        val activeButtons = mutableListOf<String>()
+        val buttons = buttonMask.toInt()
+        
+        for (bit in 0..15) {
+            if ((buttons and (1 shl bit)) != 0) {
+                activeButtons.add(getButtonName(bit))
+            }
+        }
+        return activeButtons
+    }
+    
+    private fun logMotionChanges(lx: Short, ly: Short, rx: Short, ry: Short, lt: Short, rt: Short, dpadX: Short, dpadY: Short, deviceId: Int) {
+        val threshold = 1000 // Only log significant movements
+        
+        // Left stick movement
+        if (abs(lx.toInt()) > threshold || abs(ly.toInt()) > threshold) {
+            val lxPercent = String.format("%.1f", (lx / 327.67f))
+            val lyPercent = String.format("%.1f", (ly / 327.67f))
+            val message = "🕸️ LEFT STICK: X=$lxPercent%, Y=$lyPercent%"
+            Timber.i(message)
+            
+            // Emit UI log message
+            val logMessage = LogMessage(
+                message = message,
+                level = LogLevel.INFO,
+                deviceName = "Gamepad",
+                deviceId = deviceId,
+                source = LogSource.GAMEPAD
+            )
+            _logMessageFlow.tryEmit(logMessage)
+        }
+        
+        // Right stick movement
+        if (abs(rx.toInt()) > threshold || abs(ry.toInt()) > threshold) {
+            val rxPercent = String.format("%.1f", (rx / 327.67f))
+            val ryPercent = String.format("%.1f", (ry / 327.67f))
+            val message = "🕸️ RIGHT STICK: X=$rxPercent%, Y=$ryPercent%"
+            Timber.i(message)
+            
+            // Emit UI log message
+            val logMessage = LogMessage(
+                message = message,
+                level = LogLevel.INFO,
+                deviceName = "Gamepad",
+                deviceId = deviceId,
+                source = LogSource.GAMEPAD
+            )
+            _logMessageFlow.tryEmit(logMessage)
+        }
+        
+        // Trigger presses
+        if (lt.toInt() > 500) {
+            val ltPercent = String.format("%.1f", (lt / 655.35f))
+            val message = "⏮️ LEFT TRIGGER: $ltPercent%"
+            Timber.i(message)
+            
+            // Emit UI log message
+            val logMessage = LogMessage(
+                message = message,
+                level = LogLevel.INFO,
+                deviceName = "Gamepad",
+                deviceId = deviceId,
+                source = LogSource.GAMEPAD
+            )
+            _logMessageFlow.tryEmit(logMessage)
+        }
+        if (rt.toInt() > 500) {
+            val rtPercent = String.format("%.1f", (rt / 655.35f))
+            val message = "⏭️ RIGHT TRIGGER: $rtPercent%"
+            Timber.i(message)
+            
+            // Emit UI log message
+            val logMessage = LogMessage(
+                message = message,
+                level = LogLevel.INFO,
+                deviceName = "Gamepad",
+                deviceId = deviceId,
+                source = LogSource.GAMEPAD
+            )
+            _logMessageFlow.tryEmit(logMessage)
+        }
+        
+        // D-pad movement
+        if (dpadX.toInt() != 0 || dpadY.toInt() != 0) {
+            val direction = when {
+                dpadY.toInt() < 0 && dpadX.toInt() == 0 -> "UP"
+                dpadY.toInt() > 0 && dpadX.toInt() == 0 -> "DOWN"
+                dpadX.toInt() < 0 && dpadY.toInt() == 0 -> "LEFT"
+                dpadX.toInt() > 0 && dpadY.toInt() == 0 -> "RIGHT"
+                dpadY.toInt() < 0 && dpadX.toInt() < 0 -> "UP-LEFT"
+                dpadY.toInt() < 0 && dpadX.toInt() > 0 -> "UP-RIGHT"
+                dpadY.toInt() > 0 && dpadX.toInt() < 0 -> "DOWN-LEFT"
+                dpadY.toInt() > 0 && dpadX.toInt() > 0 -> "DOWN-RIGHT"
+                else -> "CENTER"
+            }
+            val message = "🧭 D-PAD: $direction"
+            Timber.i(message)
+            
+            // Emit UI log message
+            val logMessage = LogMessage(
+                message = message,
+                level = LogLevel.INFO,
+                deviceName = "Gamepad",
+                deviceId = deviceId,
+                source = LogSource.GAMEPAD
+            )
+            _logMessageFlow.tryEmit(logMessage)
         }
     }
     
@@ -241,6 +430,47 @@ class GamepadInputHandler {
     fun configureDeadzones(stickDeadzone: Float, triggerDeadzone: Float) {
         // Configuration would be applied here if needed
         Timber.d("Deadzone configuration: stick=$stickDeadzone, trigger=$triggerDeadzone")
+    }
+    
+    private fun logGamepadStateSummary(state: GamepadState) {
+        // Log comprehensive gamepad state for debugging
+        
+        val activeButtons = getActiveButtonNames(state.buttons)
+        val leftStick = state.getNormalizedLeftStick()
+        val rightStick = state.getNormalizedRightStick()
+        val triggers = state.getNormalizedTriggers()
+        
+        val summary = buildString {
+            append("📊 GAMEPAD STATE: ")
+            
+            if (activeButtons.isNotEmpty()) {
+                append("Buttons=[${activeButtons.joinToString(",")}] ")
+            }
+            
+            if (abs(leftStick.first) > 0.1f || abs(leftStick.second) > 0.1f) {
+                append("LS=(${String.format("%.2f", leftStick.first)},${String.format("%.2f", leftStick.second)}) ")
+            }
+            
+            if (abs(rightStick.first) > 0.1f || abs(rightStick.second) > 0.1f) {
+                append("RS=(${String.format("%.2f", rightStick.first)},${String.format("%.2f", rightStick.second)}) ")
+            }
+            
+            if (triggers.first > 0.1f) {
+                append("LT=${String.format("%.2f", triggers.first)} ")
+            }
+            
+            if (triggers.second > 0.1f) {
+                append("RT=${String.format("%.2f", triggers.second)} ")
+            }
+            
+            if (state.dpadX.toInt() != 0 || state.dpadY.toInt() != 0) {
+                append("DPAD=(${state.dpadX},${state.dpadY}) ")
+            }
+            
+            append("Device=${state.deviceId}")
+        }
+        
+        Timber.d(summary)
     }
     
     companion object {

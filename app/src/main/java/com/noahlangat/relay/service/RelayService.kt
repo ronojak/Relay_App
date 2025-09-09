@@ -173,6 +173,21 @@ class RelayService : Service() {
                     source = LogSource.GAMEPAD
                 )
                 
+                // Start monitoring gamepad button/input events for UI logging
+                launch {
+                    gamepadInputHandler.logMessageFlow.collect { logMessage ->
+                        val currentLogs = _logMessages.value.toMutableList()
+                        currentLogs.add(logMessage)
+                        
+                        // Keep only last 200 messages to prevent memory issues
+                        if (currentLogs.size > 200) {
+                            currentLogs.removeAt(0)
+                        }
+                        
+                        _logMessages.value = currentLogs
+                    }
+                }
+
                 // Monitor gamepad input and relay to network clients
                 gamepadInputHandler.gamepadStateFlow.collect { gamepadState ->
                     try {

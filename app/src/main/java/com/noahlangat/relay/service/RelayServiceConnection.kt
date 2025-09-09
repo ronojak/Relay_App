@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import com.noahlangat.relay.ui.components.LogMessage
 
 /**
  * Manages connection to the RelayService for UI components
@@ -30,6 +31,9 @@ class RelayServiceConnection(private val context: Context) : ServiceConnection {
 
     private val _serviceStats = MutableStateFlow<RelayService.ServiceStats?>(null)
     val serviceStats: StateFlow<RelayService.ServiceStats?> = _serviceStats
+
+    private val _logMessages = MutableStateFlow<List<LogMessage>>(emptyList())
+    val logMessages: StateFlow<List<LogMessage>> = _logMessages
 
     override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
         val binder = service as? RelayService.RelayServiceBinder
@@ -53,6 +57,19 @@ class RelayServiceConnection(private val context: Context) : ServiceConnection {
                     _serviceStats.value = s
                 }
             }
+            
+            // Collect log messages
+            scope.launch {
+                srv.logMessages.collect { logs ->
+                    _logMessages.value = logs
+                }
+            }
+            
+            // Add immediate test message to verify message flow
+            scope.launch {
+                // Add test message directly to service
+                srv.testLogMessage()
+            }
         } else {
             Timber.e("Failed to get RelayService from binder")
         }
@@ -65,6 +82,7 @@ class RelayServiceConnection(private val context: Context) : ServiceConnection {
         _isConnected.value = false
         _serviceState.value = null
         _serviceStats.value = null
+        _logMessages.value = emptyList()
     }
 
     /** Bind to the RelayService */
@@ -91,6 +109,7 @@ class RelayServiceConnection(private val context: Context) : ServiceConnection {
         _isConnected.value = false
         _serviceState.value = null
         _serviceStats.value = null
+        _logMessages.value = emptyList()
     }
 
     /** Start the relay service */

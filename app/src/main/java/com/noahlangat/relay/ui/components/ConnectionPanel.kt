@@ -1,8 +1,11 @@
 package com.noahlangat.relay.ui.components
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -15,10 +18,15 @@ fun ConnectionPanel(
     connectedDevices: List<BluetoothManager.GamepadDevice>,
     serverPort: String,
     clientInfo: String?,
+    isDiscovering: Boolean = false,
     onDeviceSelect: (Int) -> Unit,
     onPortChange: (String) -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
+    onRefresh: () -> Unit = {},
+    onConnectAll: () -> Unit = {},
+    onDisconnectAll: () -> Unit = {},
+    selectedDeviceId: Int? = null,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -29,14 +37,48 @@ fun ConnectionPanel(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                text = "Connection",
-                style = MaterialTheme.typography.titleMedium
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Connection",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (isDiscovering) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Text(
+                            text = "Discovering...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    
+                    IconButton(
+                        onClick = onRefresh,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "Refresh devices",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
             
             // Bluetooth Device Selection
             var expanded by remember { mutableStateOf(false) }
-            var selectedDevice by remember { mutableStateOf<BluetoothManager.GamepadDevice?>(null) }
+            val selectedDevice = connectedDevices.find { it.id == selectedDeviceId }
             
             ExposedDropdownMenuBox(
                 expanded = expanded,
@@ -57,15 +99,31 @@ fun ConnectionPanel(
                     expanded = expanded,
                     onDismissRequest = { expanded = false }
                 ) {
-                    connectedDevices.forEach { device ->
+                    if (connectedDevices.isEmpty()) {
                         DropdownMenuItem(
-                            text = { Text(device.name) },
-                            onClick = {
-                                selectedDevice = device
-                                onDeviceSelect(device.id)
-                                expanded = false
-                            }
+                            text = { Text("No devices found") },
+                            onClick = { },
+                            enabled = false
                         )
+                    } else {
+                        connectedDevices.forEach { device ->
+                            DropdownMenuItem(
+                                text = { 
+                                    Column {
+                                        Text(device.name)
+                                        Text(
+                                            text = "${device.deviceType.name} ${if (device.isConnected) "• Connected" else "• Available"}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    onDeviceSelect(device.id)
+                                    expanded = false
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -78,14 +136,27 @@ fun ConnectionPanel(
                 modifier = Modifier.fillMaxWidth()
             )
             
-            // Client Info
-            Text(
-                text = clientInfo ?: stringResource(R.string.no_client_connected),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            // Client Info and Connection Status
+            val connectedCount = connectedDevices.count { it.isConnected }
+            val totalCount = connectedDevices.size
             
-            // Connection Buttons
+            Column {
+                Text(
+                    text = clientInfo ?: stringResource(R.string.no_client_connected),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                if (totalCount > 0) {
+                    Text(
+                        text = "Devices: $connectedCount/$totalCount connected",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (connectedCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            
+            // Individual Device Connection Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -95,14 +166,39 @@ fun ConnectionPanel(
                     modifier = Modifier.weight(1f),
                     enabled = selectedDevice != null
                 ) {
-                    Text(stringResource(R.string.connect))
+                    Text(if (selectedDevice?.isConnected == true) "Reconnect" else "Connect")
                 }
                 
                 OutlinedButton(
                     onClick = onDisconnect,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    enabled = selectedDevice?.isConnected == true
                 ) {
-                    Text(stringResource(R.string.disconnect))
+                    Text("Disconnect")
+                }
+            }
+            
+            // Bulk Connection Buttons
+            if (totalCount > 1) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = onConnectAll,
+                        modifier = Modifier.weight(1f),
+                        enabled = connectedCount < totalCount
+                    ) {
+                        Text("Connect All")
+                    }
+                    
+                    OutlinedButton(
+                        onClick = onDisconnectAll,
+                        modifier = Modifier.weight(1f),
+                        enabled = connectedCount > 0
+                    ) {
+                        Text("Disconnect All")
+                    }
                 }
             }
         }

@@ -16,7 +16,7 @@ object ProtocolConstants {
     const val MSG_DEVICE_INFO: Byte = 0x20
     
     // Protocol constraints
-    const val ENVELOPE_SIZE = 14 // bytes
+    const val ENVELOPE_SIZE = 16 // bytes (1+1+2+4+8)
     const val GAMEPAD_STATE_SIZE = 26 // bytes minimum
     const val SENSOR_DATA_SIZE = 12 // bytes optional
     const val MAX_PACKET_SIZE = ENVELOPE_SIZE + GAMEPAD_STATE_SIZE + SENSOR_DATA_SIZE

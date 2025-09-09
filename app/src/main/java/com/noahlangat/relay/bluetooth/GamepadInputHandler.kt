@@ -43,6 +43,7 @@ class GamepadInputHandler {
         val buttonBit = mapKeyCodeToButtonBit(event.keyCode) ?: return false
         val isPressed = event.action == KeyEvent.ACTION_DOWN
         
+        Timber.d("GamepadInputHandler: Key event - keyCode=${event.keyCode}, pressed=$isPressed")
         updateButtonState(buttonBit, isPressed, deviceId)
         return true
     }
@@ -53,6 +54,7 @@ class GamepadInputHandler {
     fun handleMotionEvent(event: MotionEvent, deviceId: Int): Boolean {
         if (!isGamepadEvent(event)) return false
         
+        Timber.d("GamepadInputHandler: Motion event - deviceId=$deviceId")
         val newState = currentState.copy(
             deviceId = deviceId.toByte(),
             leftStickX = applyDeadzone(event.getAxisValue(MotionEvent.AXIS_X), stickDeadzone).toInt().toShort(),

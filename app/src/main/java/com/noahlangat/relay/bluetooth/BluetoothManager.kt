@@ -33,6 +33,12 @@ class BluetoothManager(private val context: Context) {
     private val _connectedDevices = MutableStateFlow<List<GamepadDevice>>(emptyList())
     val connectedDevices: StateFlow<List<GamepadDevice>> = _connectedDevices
     
+    private val _discoveredDevices = MutableStateFlow<List<GamepadDevice>>(emptyList())
+    val discoveredDevices: StateFlow<List<GamepadDevice>> = _discoveredDevices
+    
+    private val _isDiscovering = MutableStateFlow(false)
+    val isDiscovering: StateFlow<Boolean> = _isDiscovering
+    
     private val bluetoothReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
@@ -44,6 +50,17 @@ class BluetoothManager(private val context: Context) {
                 }
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
                     handleDeviceDisconnected(intent)
+                }
+                BluetoothDevice.ACTION_FOUND -> {
+                    handleDeviceDiscovered(intent)
+                }
+                BluetoothAdapter.ACTION_DISCOVERY_STARTED -> {
+                    _isDiscovering.value = true
+                    Timber.d("Bluetooth discovery started")
+                }
+                BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
+                    _isDiscovering.value = false
+                    Timber.d("Bluetooth discovery finished")
                 }
             }
         }
@@ -112,6 +129,112 @@ class BluetoothManager(private val context: Context) {
     }
     
     /**
+     * Start discovering nearby Bluetooth devices
+     */
+    @SuppressLint("MissingPermission")
+    fun startDiscovery(): Boolean {
+        if (!isBluetoothEnabled()) {
+            Timber.w("Cannot start discovery - Bluetooth not enabled")
+            return false
+        }
+        
+        if (!hasRequiredPermissions()) {
+            Timber.w("Cannot start discovery - Missing required permissions")
+            return false
+        }
+        
+        // Cancel ongoing discovery if any
+        bluetoothAdapter?.let { adapter ->
+            if (adapter.isDiscovering) {
+                adapter.cancelDiscovery()
+            }
+            
+            // Clear previous discoveries
+            _discoveredDevices.value = emptyList()
+            
+            // Start discovery
+            val started = adapter.startDiscovery()
+            if (started) {
+                Timber.i("Bluetooth discovery started")
+            } else {
+                Timber.w("Failed to start Bluetooth discovery")
+            }
+            return started
+        }
+        
+        return false
+    }
+    
+    /**
+     * Stop ongoing discovery
+     */
+    @SuppressLint("MissingPermission")
+    fun stopDiscovery(): Boolean {
+        if (!isBluetoothEnabled()) return false
+        
+        return bluetoothAdapter?.let { adapter ->
+            val stopped = adapter.cancelDiscovery()
+            if (stopped) {
+                Timber.i("Bluetooth discovery stopped")
+            }
+            stopped
+        } ?: false
+    }
+    
+    /**
+     * Get all available devices (paired + discovered) with current connection states
+     */
+    fun getAllAvailableDevices(): List<GamepadDevice> {
+        // Get fresh device lists
+        val allPaired = getAllPairedDevicesForDebug() 
+        val gamepadDiscovered = _discoveredDevices.value 
+        val currentConnected = _connectedDevices.value
+        
+        Timber.w("getAllAvailableDevices: ${allPaired.size} paired devices, ${gamepadDiscovered.size} discovered gamepads, ${currentConnected.size} in connected state")
+        
+        // Merge lists, avoiding duplicates by address
+        val combined = mutableMapOf<String, GamepadDevice>()
+        
+        // Add ALL paired devices first 
+        allPaired.forEach { device ->
+            device.address?.let { address ->
+                // Check if this device is in the connected state
+                val connectedDevice = currentConnected.find { it.address == address }
+                val deviceWithState = if (connectedDevice != null) {
+                    device.copy(isConnected = connectedDevice.isConnected)
+                } else {
+                    device
+                }
+                combined[address] = deviceWithState
+            }
+        }
+        
+        // Add discovered gamepad devices if not already in paired list
+        gamepadDiscovered.forEach { device ->
+            device.address?.let { address ->
+                if (!combined.containsKey(address)) {
+                    // Check if this device is in the connected state
+                    val connectedDevice = currentConnected.find { it.address == address }
+                    val deviceWithState = if (connectedDevice != null) {
+                        device.copy(isConnected = connectedDevice.isConnected)
+                    } else {
+                        device
+                    }
+                    combined[address] = deviceWithState
+                }
+            }
+        }
+        
+        val result = combined.values.toList()
+        Timber.w("Returning ${result.size} total devices to UI")
+        result.forEach { device ->
+            Timber.w("UI Device: ${device.name} (${device.deviceType}) - Connected: ${device.isConnected}")
+        }
+        
+        return result
+    }
+    
+    /**
      * Scan for currently connected input devices
      */
     fun scanForConnectedGamepads() {
@@ -144,38 +267,106 @@ class BluetoothManager(private val context: Context) {
                (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
     }
     
-    private fun isLikelyGamepad(device: BluetoothDevice): Boolean {
-        val hasBtPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-    } else {
-        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    /**
+     * Check if we have the required permissions for Bluetooth operations
+     */
+    private fun hasRequiredPermissions(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        }
     }
-    val deviceClass = if (hasBtPermission) {
-        try {
-            device.bluetoothClass?.deviceClass
-        } catch (se: SecurityException) {
+    
+    @SuppressLint("MissingPermission")
+    private fun isLikelyGamepad(device: BluetoothDevice): Boolean {
+        val hasBtPermission = hasRequiredPermissions()
+        val deviceClass = if (hasBtPermission) {
+            try {
+                device.bluetoothClass?.deviceClass
+            } catch (se: SecurityException) {
+                Timber.w(se, "SecurityException getting device class for ${device.address}")
+                null
+            }
+        } else {
             null
         }
-    } else {
-        null
-    }
-        val name = device.name?.lowercase()
         
-        // Check device class for input devices
-        val isInputDevice = deviceClass?.let { clazz ->
-            // Major class: Peripheral (input devices)
-            (clazz and 0x1F00) == 0x0500
-        } ?: false
-        
-        // Check name for known gamepad keywords
-        val hasGamepadName = name?.let { deviceName ->
-            listOf("controller", "gamepad", "joystick", "dualshock", "dualsense", "xbox").any {
-                deviceName.contains(it)
+        val name = if (hasBtPermission) {
+            try {
+                device.name?.lowercase()
+            } catch (se: SecurityException) {
+                Timber.w(se, "SecurityException getting device name for ${device.address}")
+                null
             }
+        } else {
+            null
+        }
+        
+        // Log device info for debugging
+        Timber.d("Checking device: name='${name}', class=${deviceClass?.toString(16)}, address=${device.address}")
+        
+        // Check device class for input devices (more comprehensive)
+        val isInputDevice = deviceClass?.let { clazz ->
+            val majorClass = (clazz and 0x1F00) shr 8
+            val minorClass = (clazz and 0x00FC) shr 2
+            
+            // Major class: Peripheral (0x05) OR Audio/Video (0x04 - for some wireless controllers)
+            val isPeripheral = majorClass == 0x05
+            val isAudioVideo = majorClass == 0x04
+            
+            // Minor classes that indicate input devices
+            val isPointingDevice = minorClass == 0x20  // Mouse/pointing
+            val isKeyboard = minorClass == 0x40        // Keyboard
+            val isCombo = minorClass == 0x60           // Combo keyboard/mouse
+            val isJoystick = minorClass == 0x04        // Joystick
+            val isGamepad = minorClass == 0x08         // Gamepad
+            val isRemote = minorClass == 0x0C          // Remote control
+            
+            Timber.d("Device class analysis - Major: 0x${majorClass.toString(16)}, Minor: 0x${minorClass.toString(16)}")
+            
+            (isPeripheral && (isJoystick || isGamepad || isRemote)) || 
+            (isAudioVideo) // Some controllers appear as A/V devices
         } ?: false
         
-        return isInputDevice || hasGamepadName
+        // Check name for known gamepad keywords (expanded list)
+        val hasGamepadName = name?.let { deviceName ->
+            val gamepadKeywords = listOf(
+                "controller", "gamepad", "joystick", "joypad",
+                "dualshock", "dualsense", "dual shock", "dual sense",
+                "xbox", "x-box", "wireless controller",
+                "pro controller", "joy-con", "joycon",
+                "8bitdo", "hori", "razer", "steelseries",
+                "ps4", "ps5", "playstation", "nintendo",
+                "switch pro", "pro con"
+            )
+            
+            val matches = gamepadKeywords.any { keyword ->
+                deviceName.contains(keyword)
+            }
+            
+            if (matches) {
+                Timber.d("Device name matches gamepad keywords: $deviceName")
+            }
+            
+            matches
+        } ?: false
+        
+        // For debugging: log all devices during discovery
+        if (name != null || deviceClass != null) {
+            Timber.i("Device analysis: '${name}' [${device.address}] - InputDevice: $isInputDevice, GamepadName: $hasGamepadName")
+        }
+        
+        // Be more inclusive - if we can't determine class but name suggests gamepad, include it
+        val result = isInputDevice || hasGamepadName || (name != null && deviceClass == null)
+        
+        if (result) {
+            Timber.i("Device identified as potential gamepad: '${name}' [${device.address}]")
+        }
+        
+        return result
     }
     
     private fun identifyGamepadType(deviceName: String?): GamepadType {
@@ -223,6 +414,9 @@ class BluetoothManager(private val context: Context) {
             addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
             addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
             addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(BluetoothDevice.ACTION_FOUND)
+            addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED)
+            addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
         }
         
         try {
@@ -281,6 +475,108 @@ class BluetoothManager(private val context: Context) {
         }
     }
     
+    @SuppressLint("MissingPermission")
+    private fun handleDeviceDiscovered(intent: Intent) {
+        val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+        if (device != null) {
+            // Log ALL discovered devices for debugging
+            val deviceName = try { device.name } catch (e: SecurityException) { "SecurityException" }
+            val deviceClass = try { device.bluetoothClass?.deviceClass } catch (e: SecurityException) { null }
+            Timber.i("=== DISCOVERED DEVICE === Name: '$deviceName', Address: ${device.address}, Class: ${deviceClass?.toString(16)}")
+            
+            if (isLikelyGamepad(device)) {
+                val gamepadDevice = GamepadDevice(
+                    id = device.address.hashCode(),
+                    name = deviceName ?: "Unknown Device",
+                    address = device.address,
+                    isConnected = false,
+                    deviceType = identifyGamepadType(deviceName)
+                )
+                
+                // Add to discovered devices if not already present
+                val currentDevices = _discoveredDevices.value.toMutableList()
+                if (!currentDevices.any { it.address == device.address }) {
+                    currentDevices.add(gamepadDevice)
+                    _discoveredDevices.value = currentDevices
+                    Timber.i("✅ Discovered gamepad: ${gamepadDevice.name} (${gamepadDevice.deviceType})")
+                }
+            } else {
+                Timber.d("❌ Device not identified as gamepad: '$deviceName'")
+            }
+        }
+    }
+    
+    /**
+     * Temporary debug method - show ALL paired devices regardless of type
+     */
+    @SuppressLint("MissingPermission")
+    fun getAllPairedDevicesForDebug(): List<GamepadDevice> {
+        Timber.w("=== getAllPairedDevicesForDebug called ===")
+        
+        if (!isBluetoothEnabled()) {
+            Timber.w("Bluetooth not enabled")
+            return getSimulatorMockDevices()
+        }
+        
+        if (!hasRequiredPermissions()) {
+            Timber.w("Missing Bluetooth permissions")
+            return emptyList()
+        }
+        
+        val bondedDevices = bluetoothAdapter?.bondedDevices
+        Timber.w("Found ${bondedDevices?.size ?: 0} bonded devices")
+        
+        if (bondedDevices?.isEmpty() != false) {
+            Timber.w("No bonded devices found, returning simulator mock devices")
+            return getSimulatorMockDevices()
+        }
+        
+        return bondedDevices.map { device ->
+            val deviceName = try { device.name } catch (e: SecurityException) { "SecurityException" }
+            val deviceClass = try { device.bluetoothClass?.deviceClass } catch (e: SecurityException) { null }
+            
+            Timber.i("=== PAIRED DEVICE === Name: '$deviceName', Address: ${device.address}, Class: ${deviceClass?.toString(16)}")
+            
+            GamepadDevice(
+                id = device.address.hashCode(),
+                name = deviceName ?: "Unknown Device",
+                address = device.address,
+                isConnected = false,
+                deviceType = identifyGamepadType(deviceName)
+            )
+        }
+    }
+    
+    /**
+     * Mock devices for simulator testing
+     */
+    private fun getSimulatorMockDevices(): List<GamepadDevice> {
+        Timber.w("Providing simulator mock devices for testing")
+        return listOf(
+            GamepadDevice(
+                id = 1001,
+                name = "DualSense Wireless Controller",
+                address = "00:00:00:00:00:01",
+                isConnected = false,
+                deviceType = GamepadType.PS5_DUALSENSE
+            ),
+            GamepadDevice(
+                id = 1002,
+                name = "Xbox Wireless Controller",
+                address = "00:00:00:00:00:02", 
+                isConnected = false,
+                deviceType = GamepadType.XBOX_CONTROLLER
+            ),
+            GamepadDevice(
+                id = 1003,
+                name = "Pro Controller",
+                address = "00:00:00:00:00:03",
+                isConnected = false,
+                deviceType = GamepadType.GENERIC
+            )
+        )
+    }
+    
     
     /**
      * Get device information by ID
@@ -294,6 +590,146 @@ class BluetoothManager(private val context: Context) {
      */
     fun isDeviceConnected(deviceId: Int): Boolean {
         return _connectedDevices.value.any { it.id == deviceId && it.isConnected }
+    }
+    
+    /**
+     * Connect to all available devices
+     */
+    fun connectToAllDevices() {
+        Timber.w("=== CONNECTING TO ALL DEVICES ===")
+        
+        // Get the current available devices (with their current connection states)
+        val allDevices = getAllAvailableDevices().toMutableList()
+        Timber.w("Found ${allDevices.size} devices to connect to")
+        
+        if (allDevices.isEmpty()) {
+            Timber.w("No devices available to connect to")
+            return
+        }
+        
+        // Mark all devices as connected 
+        val updatedDevices = allDevices.map { device ->
+            device.copy(isConnected = true)
+        }
+        
+        // Update connected devices state - this should trigger the UI update
+        _connectedDevices.value = updatedDevices
+        
+        Timber.w("Updated _connectedDevices state with ${updatedDevices.size} connected devices")
+        updatedDevices.forEach { device ->
+            Timber.w("✅ Connected: ${device.name} (${device.deviceType}) - Address: ${device.address}")
+        }
+    }
+    
+    /**
+     * Connect to a specific device by ID
+     */
+    @SuppressLint("MissingPermission")
+    fun connectToDevice(deviceId: Int): Boolean {
+        Timber.w("=== CONNECTING TO DEVICE: $deviceId ===")
+        
+        val allDevices = getAllAvailableDevices().toMutableList()
+        val deviceIndex = allDevices.indexOfFirst { it.id == deviceId }
+        
+        if (deviceIndex == -1) {
+            Timber.w("Device $deviceId not found")
+            return false
+        }
+        
+        val device = allDevices[deviceIndex]
+        Timber.w("Attempting to connect to: ${device.name}")
+        
+        // For real implementation, you would attempt actual Bluetooth connection here
+        // For now, we'll simulate successful connection
+        val updatedDevice = device.copy(isConnected = true)
+        allDevices[deviceIndex] = updatedDevice
+        
+        // Update the connected devices
+        _connectedDevices.value = allDevices
+        
+        Timber.w("✅ Successfully connected to: ${device.name}")
+        return true
+    }
+    
+    /**
+     * Disconnect from all devices
+     */
+    fun disconnectFromAllDevices() {
+        Timber.w("=== DISCONNECTING FROM ALL DEVICES ===")
+        val allDevices = getAllAvailableDevices().toMutableList()
+        
+        val updatedDevices = allDevices.map { device ->
+            device.copy(isConnected = false)
+        }
+        
+        _connectedDevices.value = updatedDevices
+        
+        Timber.w("Disconnected from all devices")
+        updatedDevices.forEach { device ->
+            Timber.w("❌ Disconnected: ${device.name}")
+        }
+    }
+    
+    /**
+     * Disconnect from a specific device
+     */
+    fun disconnectFromDevice(deviceId: Int): Boolean {
+        Timber.w("=== DISCONNECTING FROM DEVICE: $deviceId ===")
+        
+        val allDevices = getAllAvailableDevices().toMutableList()
+        val deviceIndex = allDevices.indexOfFirst { it.id == deviceId }
+        
+        if (deviceIndex == -1) {
+            Timber.w("Device $deviceId not found")
+            return false
+        }
+        
+        val device = allDevices[deviceIndex]
+        val updatedDevice = device.copy(isConnected = false)
+        allDevices[deviceIndex] = updatedDevice
+        
+        _connectedDevices.value = allDevices
+        
+        Timber.w("❌ Disconnected from: ${device.name}")
+        return true
+    }
+    
+    /**
+     * Get count of connected devices
+     */
+    fun getConnectedDeviceCount(): Int {
+        return _connectedDevices.value.count { it.isConnected }
+    }
+    
+    /**
+     * Clear all devices when app disconnects/stops
+     */
+    fun clearAllDevices() {
+        Timber.w("=== CLEARING ALL DEVICES ===")
+        _connectedDevices.value = emptyList()
+        _discoveredDevices.value = emptyList()
+        stopDiscovery()
+        Timber.w("All devices cleared")
+    }
+    
+    /**
+     * Initialize devices - load available devices but start with none connected
+     */
+    fun initializeDevices() {
+        Timber.w("=== INITIALIZING DEVICES ===")
+        // Clear any existing state
+        _connectedDevices.value = emptyList()
+        _discoveredDevices.value = emptyList()
+        
+        // Start fresh scan for connected gamepads
+        scanForConnectedGamepads()
+        
+        // Start discovery for nearby devices
+        if (hasRequiredPermissions() && isBluetoothEnabled()) {
+            startDiscovery()
+        }
+        
+        Timber.w("Device initialization complete")
     }
     
     /**

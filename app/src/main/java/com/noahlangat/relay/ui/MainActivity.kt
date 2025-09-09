@@ -80,17 +80,35 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Service stats (client info) -> ViewModel
- launch {
-      serviceConnection.serviceStats.collect { stats ->
-          val info = if (stats != null && stats.networkClients > 0) {
-            "Client connected"
-          } else {
-              null // shows "No client connected"
-             }
-             viewModel.setClientInfo(info)
-          }
-       }
+        // Service stats (client info and performance metrics) -> ViewModel
+        launch {
+            serviceConnection.serviceStats.collect { stats ->
+                val info = if (stats != null && stats.networkClients > 0) {
+                    "Client connected"
+                } else {
+                    null // shows "No client connected"
+                }
+                viewModel.setClientInfo(info)
+                
+                // Update performance metrics
+                if (stats != null) {
+                    viewModel.updatePerformanceStats(
+                        packetsTransmitted = stats.packetsRelayed,
+                        packetsDropped = stats.errorCount.toLong(),
+                        currentHz = stats.currentHz,
+                        averageLatency = stats.averageLatency,
+                        uptime = formatUptime(System.currentTimeMillis() - stats.uptime)
+                    )
+                }
+            }
+        }
+        
+        // Log messages -> ViewModel
+        launch {
+            serviceConnection.logMessages.collect { logMessages ->
+                viewModel.updateLogMessages(logMessages)
+            }
+        }
 
     }
 }
@@ -101,6 +119,7 @@ class MainActivity : ComponentActivity() {
             viewModel = viewModel,
             onSettingsClick = { /* Settings navigation not implemented */ },
             onStartService = {
+                Timber.i("MainActivity: Starting RelayService...")
                 val intent = android.content.Intent(
                     this,
                     com.noahlangat.relay.service.RelayService::class.java
@@ -108,6 +127,7 @@ class MainActivity : ComponentActivity() {
                     action = com.noahlangat.relay.service.RelayService.ACTION_START_RELAY
                 }
                 startForegroundService(intent)
+                Timber.i("MainActivity: startForegroundService called")
             },
             onStopService = {
                 val intent = android.content.Intent(
@@ -128,12 +148,18 @@ class MainActivity : ComponentActivity() {
     
     override fun onStart() {
         super.onStart()
-        serviceConnection.bind()
+        Timber.i("MainActivity.onStart() - Binding to service")
+        val bindResult = serviceConnection.bind()
+        Timber.i("Service bind result: $bindResult")
+        // Initialize devices when app starts
+        bluetoothManager.initializeDevices()
     }
     
     override fun onStop() {
         super.onStop()
         serviceConnection.unbind()
+        // Clear devices when app goes to background
+        bluetoothManager.clearAllDevices()
     }
     
     override fun onDestroy() {
@@ -143,11 +169,17 @@ class MainActivity : ComponentActivity() {
     
     // Handle gamepad input events
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.source and (android.view.InputDevice.SOURCE_GAMEPAD or android.view.InputDevice.SOURCE_JOYSTICK) != 0) {
+            Timber.d("MainActivity: Gamepad key event - action=${event.action}, keyCode=${event.keyCode}")
+        }
         val handled = gamepadInputHandler.handleKeyEvent(event, event.deviceId)
         return handled || super.dispatchKeyEvent(event)
     }
     
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (event.source and (android.view.InputDevice.SOURCE_GAMEPAD or android.view.InputDevice.SOURCE_JOYSTICK) != 0) {
+            Timber.d("MainActivity: Gamepad motion event - deviceId=${event.deviceId}")
+        }
         val handled = gamepadInputHandler.handleMotionEvent(event, event.deviceId)
         return handled || super.dispatchGenericMotionEvent(event)
     }
@@ -175,6 +207,13 @@ class MainActivity : ComponentActivity() {
                 != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(Manifest.permission.BLUETOOTH_ADMIN)
             }
+            // Location permission required for Bluetooth discovery on older versions
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) 
+                != PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) 
+                != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
+            }
         }
         
         if (permissionsToRequest.isNotEmpty()) {
@@ -182,6 +221,16 @@ class MainActivity : ComponentActivity() {
         } else {
             viewModel.onBluetoothPermissionGranted()
         }
+    }
+    
+    private fun formatUptime(uptimeMs: Long): String {
+        if (uptimeMs <= 0) return "00:00:00"
+        
+        val seconds = uptimeMs / 1000
+        val minutes = seconds / 60
+        val hours = minutes / 60
+        
+        return String.format("%02d:%02d:%02d", hours, minutes % 60, seconds % 60)
     }
 }
 
@@ -235,20 +284,21 @@ fun MainScreen(
                 connectedDevices = uiState.connectedDevices,
                 serverPort = uiState.serverPort,
                 clientInfo = uiState.clientInfo,
+                isDiscovering = uiState.isDiscovering,
                 onDeviceSelect = { deviceId -> viewModel.selectDevice(deviceId) },
                 onPortChange = { port -> viewModel.updatePort(port) },
                 onConnect = { viewModel.connectToDevice() },
-                onDisconnect = { viewModel.disconnectFromDevice() }
+                onDisconnect = { viewModel.disconnectFromDevice() },
+                onRefresh = { viewModel.refreshDevices() },
+                onConnectAll = { viewModel.connectToAllDevices() },
+                onDisconnectAll = { viewModel.disconnectFromAllDevices() },
+                selectedDeviceId = uiState.selectedDeviceId
             )
             
-            // Stats Panel
-            StatsPanel(
-                packetsTransmitted = uiState.packetsTransmitted,
-                packetsDropped = uiState.packetsDropped,
-                currentHz = uiState.currentHz,
-                averageLatency = uiState.averageLatency,
-                p99Latency = uiState.p99Latency,
-                uptime = uiState.uptime
+            // Log Viewer
+            LogViewer(
+                logMessages = uiState.logMessages,
+                onClearLogs = { viewModel.clearLogMessages() }
             )
             
             // Service Control

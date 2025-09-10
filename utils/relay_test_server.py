@@ -42,6 +42,7 @@ import struct
 import sys
 import time
 from typing import Optional, Tuple
+import threading
 
 # Import your protocol definitions so we stay in lockstep with formats/sizes
 from protocol import Envelope, GamepadState  # :contentReference[oaicite:3]{index=3}
@@ -98,6 +99,16 @@ def setup_logging(verbose: bool):
 
 logger = logging.getLogger("relay_test_server")
 
+# Global byte counter for TCP sink clients
+total_bytes_received = 0
+total_bytes_lock = threading.Lock()
+
+def print_inline_byte_count():
+    # Prints the byte count in KB always on the same line
+    with total_bytes_lock:
+        kb = total_bytes_received // 1024
+        print(f"\rTotal bytes received: {kb} KB", end="", flush=True)
+
 # -----------------------
 # TCP sink
 # -----------------------
@@ -121,15 +132,24 @@ async def tcp_sink_client(reader: asyncio.StreamReader, writer: asyncio.StreamWr
     peer = writer.get_extra_info("peername")
     log = logging.getLogger(f"tcp-sink:{peer}")
     log.info("Client connected")
+    global total_bytes_received
     try:
         while True:
             header = await read_exactly(reader, _ENV_SIZE, read_timeout)
+            with total_bytes_lock:
+                total_bytes_received += len(header)
+            print_inline_byte_count()
+
             env = Envelope.from_bytes(header)  # :contentReference[oaicite:4]{index=4}
             if env.length <= 0 or env.length > 4096:
                 log.warning(f"Invalid length {env.length}; dropping connection")
                 break
 
             payload = await read_exactly(reader, env.length, read_timeout)
+            with total_bytes_lock:
+                total_bytes_received += len(payload)
+            print_inline_byte_count()
+
             if env.length != _GS_SIZE:
                 log.warning(f"Length mismatch: env.length={env.length} vs GamepadState.SIZE={_GS_SIZE}")
 

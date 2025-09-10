@@ -14,6 +14,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+gradle.properties
 
 # Gradle
 #.gradle/
@@ -59,3 +60,8 @@ outputs/
 
 # Local configuration
 local.properties
+
+#python files
+*.py[cod]
+__pycache__/
+.pytest_cache/

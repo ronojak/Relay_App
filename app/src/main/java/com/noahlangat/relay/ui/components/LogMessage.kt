@@ -19,7 +19,7 @@ data class LogMessage(
         val format = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
         return format.format(Date(timestamp))
     }
-    
+
     fun getDeviceLabel(): String {
         return if (deviceId != null) {
             "$deviceName (ID:$deviceId)"
@@ -27,11 +27,21 @@ data class LogMessage(
             deviceName
         }
     }
+
+    fun getAbbreviatedDevice(): String {
+        return when (source) {
+            LogSource.SYSTEM -> "SYS"
+            LogSource.BLUETOOTH -> "BT"
+            LogSource.NETWORK -> "NW"
+            LogSource.SERVICE -> "SV"
+            LogSource.GAMEPAD -> "GP"
+        }
+    }
 }
 
 enum class LogLevel {
     DEBUG,
-    INFO, 
+    INFO,
     WARN,
     ERROR
 }

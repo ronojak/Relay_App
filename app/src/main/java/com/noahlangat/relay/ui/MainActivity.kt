@@ -41,20 +41,20 @@ import dagger.hilt.android.AndroidEntryPoint
 import timber.log.Timber
 import javax.inject.Inject
 import com.noahlangat.relay.service.RelayService
+import com.noahlangat.relay.ui.components.SettingsScreen
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-    
+
     @Inject
     lateinit var bluetoothManager: BluetoothManager
-    
+
     @Inject
     lateinit var gamepadInputHandler: GamepadInputHandler
-    
+
     private lateinit var serviceConnection: RelayServiceConnection
     private val viewModel: MainViewModel by viewModels()
-    
-    // Permission handling
+
     private val requestBluetoothPermission = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -65,32 +65,27 @@ class MainActivity : ComponentActivity() {
             viewModel.onBluetoothPermissionDenied()
         }
     }
-    
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         serviceConnection = RelayServiceConnection(this)
  lifecycleScope.launch {
     repeatOnLifecycle(Lifecycle.State.STARTED) {
-        // Service running state -> ViewModel
         launch {
             serviceConnection.serviceState.collect { state ->
                 val running = (state == com.noahlangat.relay.service.RelayService.ServiceState.RUNNING)
                 viewModel.setServiceRunning(running)
             }
         }
-
-        // Service stats (client info and performance metrics) -> ViewModel
         launch {
             serviceConnection.serviceStats.collect { stats ->
                 val info = if (stats != null && stats.networkClients > 0) {
                     "Client connected"
                 } else {
-                    null // shows "No client connected"
+                            null
                 }
                 viewModel.setClientInfo(info)
-                
-                // Update performance metrics
                 if (stats != null) {
                     viewModel.updatePerformanceStats(
                         packetsTransmitted = stats.packetsRelayed,
@@ -102,83 +97,95 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        
-        // Log messages -> ViewModel
         launch {
             serviceConnection.logMessages.collect { logMessages ->
                 viewModel.updateLogMessages(logMessages)
             }
         }
-
     }
 }
 
  setContent {
     RelayAppTheme {
-        MainScreen(
-            viewModel = viewModel,
-            onSettingsClick = { /* Settings navigation not implemented */ },
-            onStartService = {
-                Timber.i("MainActivity: Starting RelayService...")
-                val intent = android.content.Intent(
-                    this,
-                    com.noahlangat.relay.service.RelayService::class.java
-                ).apply {
-                    action = com.noahlangat.relay.service.RelayService.ACTION_START_RELAY
+                var settingsOpen by remember { mutableStateOf(false) }
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+                if (settingsOpen) {
+                    SettingsScreen(
+                        currentPort = uiState.serverPort,
+                        onPortChange = { port ->
+                            viewModel.updatePort(port)
+                            val intentStop = Intent(this, RelayService::class.java).apply {
+                                action = RelayService.ACTION_STOP_RELAY
+                            }
+                            val intentStart = Intent(this, RelayService::class.java).apply {
+                                action = RelayService.ACTION_START_RELAY
+                                putExtra(RelayService.EXTRA_PORT, port.toIntOrNull() ?: 6543)
+                            }
+                            startService(intentStop)
+                            startForegroundService(intentStart)
+                },
+                        onBack = { settingsOpen = false }
+                    )
+                } else {
+                    MainScreen(
+                        viewModel = viewModel,
+                        onSettingsClick = { settingsOpen = true },
+                        onStartService = {
+                            Timber.i("MainActivity: Starting RelayService...")
+                            val intent = Intent(
+                                this,
+                                RelayService::class.java
+                            ).apply {
+                                action = RelayService.ACTION_START_RELAY
                 }
-                startForegroundService(intent)
-                Timber.i("MainActivity: startForegroundService called")
-            },
-            onStopService = {
-                val intent = android.content.Intent(
-                    this,
-                    com.noahlangat.relay.service.RelayService::class.java
-                ).apply {
-                    action = com.noahlangat.relay.service.RelayService.ACTION_STOP_RELAY
-                }
-                startService(intent)
-            }
-        )
+                            startForegroundService(intent)
+                            Timber.i("MainActivity: startForegroundService called")
+                },
+                        onStopService = {
+                            val intent = Intent(
+                                this,
+                                RelayService::class.java
+                            ).apply {
+                                action = RelayService.ACTION_STOP_RELAY
+        }
+                            startService(intent)
     }
+            )
+                }
+            }
 }
 
-        // Check and request permissions
         checkPermissions()
     }
-    
+
     override fun onStart() {
         super.onStart()
         Timber.i("MainActivity.onStart() - Binding to service")
         val bindResult = serviceConnection.bind()
         Timber.i("Service bind result: $bindResult")
-        // Initialize devices when app starts
         bluetoothManager.initializeDevices()
     }
-    
+
     override fun onStop() {
         super.onStop()
         serviceConnection.unbind()
-        // Clear devices when app goes to background
         bluetoothManager.clearAllDevices()
     }
-    
+
     override fun onDestroy() {
         super.onDestroy()
         bluetoothManager.cleanup()
     }
-    
-    // Handle gamepad input events
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        // Log ALL key events first to debug
         Timber.i("🔑 KEY EVENT: action=${event.action}, keyCode=${event.keyCode}, source=0x${event.source.toString(16)}, deviceId=${event.deviceId}")
-        
         if (event.source and (android.view.InputDevice.SOURCE_GAMEPAD or android.view.InputDevice.SOURCE_JOYSTICK) != 0) {
             Timber.i("🎮 GAMEPAD KEY: action=${event.action}, keyCode=${event.keyCode}, deviceId=${event.deviceId}")
         }
         val handled = gamepadInputHandler.handleKeyEvent(event, event.deviceId)
         return handled || super.dispatchKeyEvent(event)
     }
-    
+
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         if (event.source and (android.view.InputDevice.SOURCE_GAMEPAD or android.view.InputDevice.SOURCE_JOYSTICK) != 0) {
             Timber.d("MainActivity: Gamepad motion event - deviceId=${event.deviceId}")
@@ -186,53 +193,50 @@ class MainActivity : ComponentActivity() {
         val handled = gamepadInputHandler.handleMotionEvent(event, event.deviceId)
         return handled || super.dispatchGenericMotionEvent(event)
     }
-    
+
     private fun checkPermissions() {
         val permissionsToRequest = mutableListOf<String>()
-        
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12+ Bluetooth permissions
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) 
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
                 != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(Manifest.permission.BLUETOOTH_CONNECT)
             }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) 
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN)
                 != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(Manifest.permission.BLUETOOTH_SCAN)
             }
         } else {
-            // Pre-Android 12 Bluetooth permissions
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) 
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH)
                 != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(Manifest.permission.BLUETOOTH)
             }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) 
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN)
                 != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(Manifest.permission.BLUETOOTH_ADMIN)
             }
-            // Location permission required for Bluetooth discovery on older versions
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) 
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED &&
-                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) 
+                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
             }
         }
-        
+
         if (permissionsToRequest.isNotEmpty()) {
             requestBluetoothPermission.launch(permissionsToRequest.toTypedArray())
         } else {
             viewModel.onBluetoothPermissionGranted()
-        }
-    }
-    
+                    }
+            }
+
     private fun formatUptime(uptimeMs: Long): String {
         if (uptimeMs <= 0) return "00:00:00"
-        
+
         val seconds = uptimeMs / 1000
         val minutes = seconds / 60
         val hours = minutes / 60
-        
+
         return String.format("%02d:%02d:%02d", hours, minutes % 60, seconds % 60)
     }
 }
@@ -246,7 +250,7 @@ fun MainScreen(
     onStopService: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -282,7 +286,6 @@ fun MainScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Connection Panel
             ConnectionPanel(
                 connectedDevices = uiState.connectedDevices,
                 serverPort = uiState.serverPort,
@@ -297,27 +300,20 @@ fun MainScreen(
                 onDisconnectAll = { viewModel.disconnectFromAllDevices() },
                 selectedDeviceId = uiState.selectedDeviceId
             )
-            
-            // Log Viewer
+
             LogViewer(
                 logMessages = uiState.logMessages,
                 onClearLogs = { viewModel.clearLogMessages() }
             )
-            
-            // Service Control
+
             ServiceControlPanel(
                 isServiceRunning = uiState.isServiceRunning,
                 onStartService = onStartService,
                 onStopService = onStopService
             )
-            
+
             // Quick Actions
             QuickActionsPanel(
-                onRestartService = {
-                    onStopService()
-                    onStartService()
-                },
-                onNetworkDiagnostics = { /* Network diagnostics not implemented */ },
                 onViewProtocolDocs = { /* Protocol docs not implemented */ }
             )
         }
@@ -365,3 +361,4 @@ fun MainScreenPreview() {
         // Preview would show mock data
     }
 }
+

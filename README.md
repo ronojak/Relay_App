@@ -3,7 +3,6 @@
 High-performance Android gamepad input relay system for real-time network applications.
 
 ## Overview
-
 Relay App captures Bluetooth gamepad input and streams it over TCP to network clients with sub-50ms latency. Designed for gaming, robotics, and IoT applications requiring precise real-time control.
 
 ## Features

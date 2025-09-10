@@ -569,5 +569,7 @@ class RelayService : Service() {
         
         const val ACTION_START_RELAY = "com.noahlangat.relay.START_RELAY"
         const val ACTION_STOP_RELAY = "com.noahlangat.relay.STOP_RELAY"
+
+        const val EXTRA_PORT = "extra_port"
     }
 }

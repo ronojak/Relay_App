@@ -26,17 +26,15 @@ fun LogViewer(
 ) {
     var selectedLogLevel by remember { mutableStateOf<LogLevel?>(null) }
     var selectedDevice by remember { mutableStateOf<String?>(null) }
-    
-    // Filter messages based on selection
+
     val filteredMessages = logMessages.filter { message ->
         val levelMatch = selectedLogLevel == null || message.level == selectedLogLevel
         val deviceMatch = selectedDevice == null || message.getDeviceLabel() == selectedDevice
         levelMatch && deviceMatch
     }
-    
-    // Get unique devices for filter dropdown
+
     val uniqueDevices = logMessages.map { it.getDeviceLabel() }.distinct().sorted()
-    
+
     Card(
         modifier = modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
@@ -45,7 +43,6 @@ fun LogViewer(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Header with title and controls
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -55,7 +52,6 @@ fun LogViewer(
                     text = "Device Messages",
                     style = MaterialTheme.typography.titleMedium
                 )
-                
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -65,8 +61,6 @@ fun LogViewer(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    
-                    // Clear logs button
                     IconButton(
                         onClick = onClearLogs,
                         modifier = Modifier.size(32.dp)
@@ -79,20 +73,16 @@ fun LogViewer(
                     }
                 }
             }
-            
-            // Filter controls
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Log level filter
                 LogLevelFilter(
                     selectedLevel = selectedLogLevel,
                     onLevelSelected = { selectedLogLevel = it },
                     modifier = Modifier.weight(1f)
                 )
-                
-                // Device filter
                 DeviceFilter(
                     selectedDevice = selectedDevice,
                     devices = uniqueDevices,
@@ -100,17 +90,15 @@ fun LogViewer(
                     modifier = Modifier.weight(1f)
                 )
             }
-            
-            // Log messages list
+
             val listState = rememberLazyListState()
-            
-            // Auto-scroll to bottom when new messages arrive
+
             LaunchedEffect(logMessages.size) {
                 if (logMessages.isNotEmpty()) {
                     listState.animateScrollToItem(logMessages.size - 1)
                 }
             }
-            
+
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -147,57 +135,42 @@ fun LogViewer(
 }
 
 @Composable
+private fun LogLevelColor(level: LogLevel): Color {
+    return when (level) {
+        LogLevel.ERROR -> MaterialTheme.colorScheme.error
+        LogLevel.WARN  -> Color(0xFFF57C00) // Orange
+        LogLevel.INFO  -> MaterialTheme.colorScheme.primary
+        LogLevel.DEBUG -> Color(0xFF607D8B) // Blue-grey
+    }
+}
+@Composable
 private fun LogMessageItem(
     message: LogMessage,
     modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier
-            .fillMaxWidth()
+                .fillMaxWidth()
             .background(
-                color = when (message.level) {
-                    LogLevel.ERROR -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
-                    LogLevel.WARN -> Color.Yellow.copy(alpha = 0.1f)
-                    LogLevel.INFO -> Color.Transparent
-                    LogLevel.DEBUG -> Color.Gray.copy(alpha = 0.1f)
-                },
+                color = Color.Transparent,
                 shape = RoundedCornerShape(4.dp)
-            )
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        // Timestamp
-        Text(
-            text = message.getFormattedTimestamp(),
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(80.dp)
         )
-        
-        // Log level
-        Text(
-            text = message.level.name,
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-            color = when (message.level) {
-                LogLevel.ERROR -> MaterialTheme.colorScheme.error
-                LogLevel.WARN -> Color(0xFFF57C00) // Orange
-                LogLevel.INFO -> MaterialTheme.colorScheme.primary
-                LogLevel.DEBUG -> MaterialTheme.colorScheme.onSurfaceVariant
-            },
-            modifier = Modifier.width(50.dp)
+            .padding(horizontal = 6.dp, vertical = 3.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+        Box(
+            modifier = Modifier
+                .size(14.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(LogLevelColor(message.level))
         )
-        
-        // Device name
         Text(
-            text = message.getDeviceLabel(),
+            text = message.getAbbreviatedDevice(),
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
             color = MaterialTheme.colorScheme.secondary,
-            modifier = Modifier.width(120.dp),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            modifier = Modifier.width(30.dp),
+            maxLines = 1
         )
-        
-        // Message content
         Text(
             text = message.message,
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
@@ -205,9 +178,15 @@ private fun LogMessageItem(
             modifier = Modifier.weight(1f),
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
-        )
-    }
-}
+            )
+        Text(
+            text = message.getFormattedTimestamp(),
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(72.dp)
+                )
+            }
+        }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -217,7 +196,7 @@ private fun LogLevelFilter(
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
-    
+
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { expanded = !expanded },
@@ -234,28 +213,24 @@ private fun LogLevelFilter(
                 .menuAnchor(),
             textStyle = MaterialTheme.typography.bodySmall
         )
-        
         ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
-            // All levels option
             DropdownMenuItem(
                 text = { Text("All Levels") },
                 onClick = {
                     onLevelSelected(null)
                     expanded = false
-                }
+}
             )
-            
-            // Individual log levels
             LogLevel.values().forEach { level ->
                 DropdownMenuItem(
                     text = { Text(level.name) },
                     onClick = {
                         onLevelSelected(level)
                         expanded = false
-                    }
+            }
                 )
             }
         }
@@ -271,7 +246,7 @@ private fun DeviceFilter(
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
-    
+
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { expanded = !expanded },
@@ -288,12 +263,10 @@ private fun DeviceFilter(
                 .menuAnchor(),
             textStyle = MaterialTheme.typography.bodySmall
         )
-        
         ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
-            // All devices option
             DropdownMenuItem(
                 text = { Text("All Devices") },
                 onClick = {
@@ -301,8 +274,6 @@ private fun DeviceFilter(
                     expanded = false
                 }
             )
-            
-            // Individual devices
             devices.forEach { device ->
                 DropdownMenuItem(
                     text = { Text(device) },
@@ -315,3 +286,4 @@ private fun DeviceFilter(
         }
     }
 }
+

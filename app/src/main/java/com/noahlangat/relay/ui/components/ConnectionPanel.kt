@@ -46,7 +46,7 @@ fun ConnectionPanel(
                     text = "Connection",
                     style = MaterialTheme.typography.titleMedium
                 )
-                
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -62,7 +62,7 @@ fun ConnectionPanel(
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
-                    
+
                     IconButton(
                         onClick = onRefresh,
                         modifier = Modifier.size(32.dp)
@@ -75,11 +75,11 @@ fun ConnectionPanel(
                     }
                 }
             }
-            
+
             // Bluetooth Device Selection
             var expanded by remember { mutableStateOf(false) }
             val selectedDevice = connectedDevices.find { it.id == selectedDeviceId }
-            
+
             ExposedDropdownMenuBox(
                 expanded = expanded,
                 onExpandedChange = { expanded = !expanded }
@@ -94,7 +94,7 @@ fun ConnectionPanel(
                         .fillMaxWidth()
                         .menuAnchor()
                 )
-                
+
                 ExposedDropdownMenu(
                     expanded = expanded,
                     onDismissRequest = { expanded = false }
@@ -108,7 +108,7 @@ fun ConnectionPanel(
                     } else {
                         connectedDevices.forEach { device ->
                             DropdownMenuItem(
-                                text = { 
+                                text = {
                                     Column {
                                         Text(device.name)
                                         Text(
@@ -127,26 +127,28 @@ fun ConnectionPanel(
                     }
                 }
             }
-            
-            // Network Settings
+
+            // Network Settings - Make port OutlinedTextField read-only and disabled
             OutlinedTextField(
                 value = serverPort,
-                onValueChange = onPortChange,
-                label = { Text(stringResource(R.string.server_port)) },
+                onValueChange = {}, // disabled
+                label = { Text("Listening port") },
+                readOnly = true,
+                enabled = false,
                 modifier = Modifier.fillMaxWidth()
             )
-            
+
             // Client Info and Connection Status
             val connectedCount = connectedDevices.count { it.isConnected }
             val totalCount = connectedDevices.size
-            
+
             Column {
                 Text(
                     text = clientInfo ?: stringResource(R.string.no_client_connected),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                
+
                 if (totalCount > 0) {
                     Text(
                         text = "Devices: $connectedCount/$totalCount connected",
@@ -155,7 +157,7 @@ fun ConnectionPanel(
                     )
                 }
             }
-            
+
             // Individual Device Connection Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -168,7 +170,7 @@ fun ConnectionPanel(
                 ) {
                     Text(if (selectedDevice?.isConnected == true) "Reconnect" else "Connect")
                 }
-                
+
                 OutlinedButton(
                     onClick = onDisconnect,
                     modifier = Modifier.weight(1f),
@@ -177,7 +179,7 @@ fun ConnectionPanel(
                     Text("Disconnect")
                 }
             }
-            
+
             // Bulk Connection Buttons
             if (totalCount > 1) {
                 Row(
@@ -191,7 +193,7 @@ fun ConnectionPanel(
                     ) {
                         Text("Connect All")
                     }
-                    
+
                     OutlinedButton(
                         onClick = onDisconnectAll,
                         modifier = Modifier.weight(1f),

@@ -11,22 +11,23 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.noahlangat.relay.R
 import com.noahlangat.relay.bluetooth.BluetoothManager
-import com.noahlangat.relay.bluetooth.GamepadInputHandler
-import com.noahlangat.relay.network.TcpServer
-import com.noahlangat.relay.protocol.GamepadState
-import com.noahlangat.relay.protocol.MessageSerializer
-import com.noahlangat.relay.ui.components.LogMessage
-import com.noahlangat.relay.ui.components.LogLevel
-import com.noahlangat.relay.ui.components.LogSource
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
 
+/**
+ * Foreground service that hosts the [RelayEngine].
+ *
+ * Responsibilities are intentionally narrow: Android service lifecycle, the
+ * ongoing notification, and exposing the engine's observable state to bound
+ * clients. All relay logic lives in [RelayEngine].
+ */
 @AndroidEntryPoint
 class RelayService : Service() {
 
@@ -34,42 +35,16 @@ class RelayService : Service() {
     lateinit var bluetoothManager: BluetoothManager
 
     @Inject
-    lateinit var gamepadInputHandler: GamepadInputHandler
+    lateinit var engine: RelayEngine
 
-    private lateinit var tcpServer: TcpServer
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-    private var relayJob: Job? = null
-
-    private val _serviceState = MutableStateFlow(ServiceState.STOPPED)
-    val serviceState: StateFlow<ServiceState> = _serviceState
-
-    private val _serviceStats = MutableStateFlow(ServiceStats())
-    val serviceStats: StateFlow<ServiceStats> = _serviceStats
-
-    private val _logMessages = MutableStateFlow<List<LogMessage>>(emptyList())
-    val logMessages: StateFlow<List<LogMessage>> = _logMessages
+    // Re-exposed engine flows for bound clients (see RelayServiceConnection).
+    val serviceState: StateFlow<RelayEngine.State> get() = engine.state
+    val serviceStats: StateFlow<RelayEngine.Stats> get() = engine.stats
+    val logMessages: StateFlow<List<com.noahlangat.relay.ui.components.LogMessage>> get() = engine.logMessages
 
     private val binder = RelayServiceBinder()
-
-    enum class ServiceState {
-        STOPPED,
-        STARTING,
-        RUNNING,
-        STOPPING,
-        ERROR
-    }
-
-    data class ServiceStats(
-        val uptime: Long = 0,
-        val packetsRelayed: Long = 0,
-        val connectedDevices: Int = 0,
-        val networkClients: Int = 0,
-        val errorCount: Int = 0,
-        val averageLatency: Float = 0f,
-        val currentHz: Float = 0f,
-        val lastPacketTime: Long = 0
-    )
 
     inner class RelayServiceBinder : Binder() {
         fun getService(): RelayService = this@RelayService
@@ -77,317 +52,47 @@ class RelayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-
-        addLogMessage(
-            message = "RelayService onCreate() called",
-            level = LogLevel.INFO,
-            source = LogSource.SERVICE
-        )
-
-        tcpServer = TcpServer(scope = serviceScope)
-
-        addLogMessage(
-            message = "GamepadInputHandler injected and TcpServer initialized",
-            level = LogLevel.INFO,
-            source = LogSource.SERVICE
-        )
-
         createNotificationChannel()
         Timber.i("RelayService created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        addLogMessage(
-            message = "RelayService onStartCommand() received - action: ${intent?.action}",
-            level = LogLevel.INFO,
-            source = LogSource.SERVICE
-        )
-
+        Timber.i("RelayService onStartCommand - action: ${intent?.action}")
         when (intent?.action) {
-            ACTION_START_RELAY -> startRelayService()
             ACTION_STOP_RELAY -> stopRelayService()
             else -> startRelayService()
         }
-
         return START_STICKY
     }
 
-    override fun onBind(intent: Intent?): IBinder {
-        return binder
-    }
+    override fun onBind(intent: Intent?): IBinder = binder
 
     private fun startRelayService() {
-        if (_serviceState.value == ServiceState.RUNNING) {
+        if (engine.state.value == RelayEngine.State.RUNNING) {
             Timber.w("RelayService already running")
-            addLogMessage(
-                message = "Service already running - ignoring start request",
-                level = LogLevel.WARN,
-                source = LogSource.SERVICE
-            )
             return
         }
 
-        addLogMessage(
-            message = "Starting RelayService...",
-            level = LogLevel.INFO,
-            source = LogSource.SERVICE
-        )
-
-        _serviceState.value = ServiceState.STARTING
-
-        val notification = createForegroundNotification()
-        startForeground(NOTIFICATION_ID, notification)
-
-        startRelay()
+        startForeground(NOTIFICATION_ID, createForegroundNotification())
+        engine.start()
+        startNotificationUpdates()
     }
 
     private fun stopRelayService() {
-        if (_serviceState.value == ServiceState.STOPPED) return
+        if (engine.state.value == RelayEngine.State.STOPPED) return
 
-        _serviceState.value = ServiceState.STOPPING
-        stopRelay()
+        engine.stop()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
-    private fun startRelay() {
-        relayJob = serviceScope.launch {
-            try {
-                Timber.i("Starting gamepad relay")
-
-                if (!tcpServer.start()) {
-                    throw IllegalStateException("Failed to start TCP server")
-                }
-
-                addLogMessage(
-                    message = "Starting to monitor gamepad input flow...",
-                    level = LogLevel.INFO,
-                    source = LogSource.SERVICE
-                )
-
-                addLogMessage(
-                    message = "GamepadInputHandler flow collection started - waiting for input events",
-                    level = LogLevel.INFO,
-                    source = LogSource.GAMEPAD
-                )
-
-                // Collect log messages from GamepadInputHandler
-                launch {
-                    gamepadInputHandler.logMessageFlow.collect { logMessage ->
-                        val currentLogs = _logMessages.value.toMutableList()
-                        currentLogs.add(logMessage)
-                        if (currentLogs.size > 200) {
-                            currentLogs.removeAt(0)
-                        }
-                        _logMessages.value = currentLogs
-                    }
-                }
-
-                // Collect the latest gamepad state and relay at a fixed frequency
-                val latestGamepadState = MutableStateFlow<GamepadState?>(null)
-
-                // Collect gamepad states and log inputs
-                launch {
-                    gamepadInputHandler.gamepadStateFlow.collectLatest { gamepadState ->
-                        latestGamepadState.value = gamepadState
-                        val buttonInfo = getButtonInfo(gamepadState)
-                        val inputMessage = if (buttonInfo.isNotEmpty()) {
-                            "$buttonInfo | LStick=(${gamepadState.leftStickX}, ${gamepadState.leftStickY}) RStick=(${gamepadState.rightStickX}, ${gamepadState.rightStickY}) Triggers=(${gamepadState.leftTrigger}, ${gamepadState.rightTrigger})"
-                        } else {
-                            "Analog input: LStick=(${gamepadState.leftStickX}, ${gamepadState.leftStickY}) RStick=(${gamepadState.rightStickX}, ${gamepadState.rightStickY}) Triggers=(${gamepadState.leftTrigger}, ${gamepadState.rightTrigger})"
-                        }
-
-                        addLogMessage(
-                            message = inputMessage,
-                            level = LogLevel.INFO,
-                            deviceName = "DualSense",
-                            deviceId = gamepadState.deviceId.toInt(),
-                            source = LogSource.GAMEPAD
-                        )
-                    }
-                }
-
-                // Main relay loop at configurable frequency
-                launch {
-                    while (isActive && _serviceState.value == ServiceState.RUNNING) {
-                        val gamepadState = latestGamepadState.value
-                        if (gamepadState != null) {
-                            try {
-                                val currentTime = System.currentTimeMillis()
-                                val message = MessageSerializer.serializeGamepadMessage(
-                                    gamepadState,
-                                    tcpServer.getNextSequenceNumber()
-                                )
-                                val success = tcpServer.broadcastGamepadState(message)
-                                if (success) {
-                                    updateStats { stats ->
-                                        val currentHz = RELAY_FREQUENCY_HZ.toFloat()
-                                        stats.copy(
-                                packetsRelayed = stats.packetsRelayed + 1,
-                                            currentHz = currentHz,
-                                lastPacketTime = currentTime,
-                                            averageLatency = calculateLatency()
-                            )
-                        }
-                                    if (currentTime % 2000 < 100) {
-        addLogMessage(
-                                            message = "Data relayed to network client (fixed ${RELAY_FREQUENCY_HZ}Hz)",
-            level = LogLevel.INFO,
-                                            source = LogSource.NETWORK
-        )
-    }
-        } else {
-                                    if (currentTime % 5000 < 100) {
-                                        addLogMessage(
-                                            message = "No network clients connected - input not relayed",
-                                            level = LogLevel.WARN,
-                                            source = LogSource.NETWORK
-                                        )
-        }
-    }
-                                Timber.v("Relayed gamepad state: ${gamepadState.buttons}")
-                            } catch (e: Exception) {
-                                Timber.e(e, "Error relaying gamepad state")
-                                addLogMessage(
-                                    message = "Error relaying gamepad state: ${e.message}",
-                                    level = LogLevel.ERROR,
-                                    source = LogSource.SERVICE
-                                )
-                                updateStats { stats ->
-                                    stats.copy(errorCount = stats.errorCount + 1)
-                                }
-                            }
-                        }
-                        delay(1000L / RELAY_FREQUENCY_HZ)
-                    }
-                }
-
-            } catch (e: Exception) {
-                Timber.e(e, "Relay service error")
-                _serviceState.value = ServiceState.ERROR
-                updateStats { stats ->
-                    stats.copy(errorCount = stats.errorCount + 1)
-                }
-            }
-        }
-
-        startMonitoringLoops()
-
-        _serviceState.value = ServiceState.RUNNING
-        updateStats { stats ->
-            stats.copy(uptime = System.currentTimeMillis())
-        }
-
-        addLogMessage(
-            message = "Relay service started successfully",
-            level = LogLevel.INFO,
-            source = LogSource.SERVICE
-        )
-
-        Timber.i("Gamepad relay service started")
-    }
-
-    private fun stopRelay() {
-        relayJob?.cancel()
+    private fun startNotificationUpdates() {
         serviceScope.launch {
-            tcpServer.stop()
-    }
-
-        _serviceState.value = ServiceState.STOPPED
-        addLogMessage(
-            message = "Relay service stopped",
-            level = LogLevel.INFO,
-            source = LogSource.SERVICE
-        )
-        Timber.i("Gamepad relay service stopped")
-    }
-
-    private fun startMonitoringLoops() {
-        // Monitor Bluetooth devices
-        serviceScope.launch {
-            var previousDeviceCount = 0
-            bluetoothManager.connectedDevices.collect { devices ->
-                updateStats { stats ->
-                    stats.copy(connectedDevices = devices.size)
-                }
-
-                if (devices.size != previousDeviceCount) {
-                    if (devices.size > previousDeviceCount) {
-                        devices.takeLast(devices.size - previousDeviceCount).forEach { device ->
-                            addLogMessage(
-                                message = "Bluetooth device connected",
-                                level = LogLevel.INFO,
-                                deviceName = device.name,
-                                deviceId = device.id,
-                                source = LogSource.BLUETOOTH
-                            )
-                        }
-                    } else if (devices.size < previousDeviceCount) {
-                        addLogMessage(
-                            message = "${previousDeviceCount - devices.size} Bluetooth device(s) disconnected",
-                            level = LogLevel.INFO,
-                            source = LogSource.BLUETOOTH
-                        )
-                    }
-                    previousDeviceCount = devices.size
-                }
-            }
-        }
-
-        // Monitor network connections
-        serviceScope.launch {
-            var previousClientConnected = false
-            tcpServer.serverState.collect { serverState ->
-                val clientConnected = serverState == TcpServer.ServerState.CLIENT_CONNECTED
-                val clientCount = if (clientConnected) 1 else 0
-
-                updateStats { stats ->
-                    stats.copy(networkClients = clientCount)
-                }
-
-                if (clientConnected != previousClientConnected) {
-                    if (clientConnected) {
-                        addLogMessage(
-                            message = "Network client connected to TCP server",
-                            level = LogLevel.INFO,
-                            source = LogSource.NETWORK
-                        )
-                    } else {
-                        addLogMessage(
-                            message = "Network client disconnected from TCP server",
-                            level = LogLevel.INFO,
-                            source = LogSource.NETWORK
-                        )
-                    }
-                    previousClientConnected = clientConnected
-                }
-            }
-        }
-
-        // Periodically update notification and generate simulated stats for testing
-        serviceScope.launch {
-            while (_serviceState.value == ServiceState.RUNNING) {
+            while (engine.state.value == RelayEngine.State.RUNNING ||
+                engine.state.value == RelayEngine.State.STARTING
+            ) {
                 updateNotification()
-
-                val currentStats = _serviceStats.value
-                if (currentStats.connectedDevices > 0 && currentStats.networkClients > 0) {
-                    updateStats { stats ->
-                        val currentTime = System.currentTimeMillis()
-                        val timeDiff = currentTime - stats.lastPacketTime
-
-                        if (timeDiff > 5000) {
-                            stats.copy(
-                                packetsRelayed = stats.packetsRelayed + 1,
-                                currentHz = 60.0f,
-                                lastPacketTime = currentTime,
-                                averageLatency = 12.5f + (Math.random() * 5).toFloat()
-                            )
-                        } else {
-                            stats
-                        }
-                    }
-                }
-                delay(1000)
+                kotlinx.coroutines.delay(1000)
             }
         }
     }
@@ -401,9 +106,7 @@ class RelayService : Service() {
             description = "Ongoing gamepad relay service"
             setShowBadge(false)
         }
-
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager.createNotificationChannel(channel)
+        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
     private fun createForegroundNotification(): Notification {
@@ -423,16 +126,12 @@ class RelayService : Service() {
             .setSmallIcon(R.drawable.ic_gamepad)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(
-                R.drawable.ic_stop,
-                "Stop",
-                stopPendingIntent
-            )
+            .addAction(R.drawable.ic_stop, "Stop", stopPendingIntent)
             .build()
     }
 
     private fun updateNotification() {
-        val stats = _serviceStats.value
+        val stats = engine.stats.value
         val uptime = System.currentTimeMillis() - stats.uptime
         val uptimeText = formatUptime(uptime)
 
@@ -450,8 +149,7 @@ class RelayService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager.notify(NOTIFICATION_ID, notification)
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
     }
 
     private fun formatUptime(uptimeMs: Long): String {
@@ -466,86 +164,18 @@ class RelayService : Service() {
         }
     }
 
-    private inline fun updateStats(update: (ServiceStats) -> ServiceStats) {
-        _serviceStats.value = update(_serviceStats.value)
-    }
-
-    private fun calculateLatency(): Float {
-        return when {
-            tcpServer.serverState.value == TcpServer.ServerState.CLIENT_CONNECTED -> 5.0f + (Math.random() * 10).toFloat()
-            else -> 0.0f
-        }
-    }
-
-    private fun addLogMessage(
-        message: String,
-        level: LogLevel = LogLevel.INFO,
-        deviceName: String = "System",
-        deviceId: Int? = null,
-        source: LogSource = LogSource.SYSTEM
-    ) {
-        val logMessage = LogMessage(
-            message = message,
-            level = level,
-            deviceName = deviceName,
-            deviceId = deviceId,
-            source = source
-        )
-
-        val currentLogs = _logMessages.value.toMutableList()
-        currentLogs.add(logMessage)
-
-        if (currentLogs.size > 200) {
-            currentLogs.removeAt(0)
-        }
-
-        _logMessages.value = currentLogs
-    }
-
-    fun testLogMessage() {
-        addLogMessage(
-            message = "TEST: Service connection successful - LogViewer should display this message",
-            level = LogLevel.INFO,
-            source = LogSource.SERVICE
-        )
-    }
-
-    private fun getButtonInfo(gamepadState: GamepadState): String {
-        val pressedButtons = mutableListOf<String>()
-        val buttons = gamepadState.buttons.toInt()
-
-        if ((buttons and (1 shl 0)) != 0) pressedButtons.add("X")
-        if ((buttons and (1 shl 1)) != 0) pressedButtons.add("Circle")
-        if ((buttons and (1 shl 2)) != 0) pressedButtons.add("Square")
-        if ((buttons and (1 shl 3)) != 0) pressedButtons.add("Triangle")
-        if ((buttons and (1 shl 4)) != 0) pressedButtons.add("L1")
-        if ((buttons and (1 shl 5)) != 0) pressedButtons.add("R1")
-        if ((buttons and (1 shl 6)) != 0) pressedButtons.add("L2")
-        if ((buttons and (1 shl 7)) != 0) pressedButtons.add("R2")
-        if ((buttons and (1 shl 8)) != 0) pressedButtons.add("Share")
-        if ((buttons and (1 shl 9)) != 0) pressedButtons.add("Options")
-        if ((buttons and (1 shl 10)) != 0) pressedButtons.add("L3")
-        if ((buttons and (1 shl 11)) != 0) pressedButtons.add("R3")
-        if ((buttons and (1 shl 12)) != 0) pressedButtons.add("PS")
-        if ((buttons and (1 shl 13)) != 0) pressedButtons.add("Touch")
-
-        return if (pressedButtons.isNotEmpty()) {
-            "Buttons: ${pressedButtons.joinToString(", ")}"
-        } else {
-            ""
-        }
-    }
+    /** Delegated to the engine; kept for the bound-client diagnostics path. */
+    fun testLogMessage() = engine.testLogMessage()
 
     override fun onDestroy() {
         super.onDestroy()
+        engine.shutdown()
         bluetoothManager.cleanup()
         serviceScope.cancel()
         Timber.i("RelayService destroyed")
     }
 
     companion object {
-        private const val RELAY_FREQUENCY_HZ = 10
-        private const val TAG = "RelayService"
         private const val CHANNEL_ID = "relay_service_channel"
         private const val NOTIFICATION_ID = 1001
 

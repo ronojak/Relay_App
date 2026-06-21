@@ -26,11 +26,11 @@ class RelayServiceConnection(private val context: Context) : ServiceConnection {
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected
 
-    private val _serviceState = MutableStateFlow<RelayService.ServiceState?>(null)
-    val serviceState: StateFlow<RelayService.ServiceState?> = _serviceState
+    private val _serviceState = MutableStateFlow<RelayEngine.State?>(null)
+    val serviceState: StateFlow<RelayEngine.State?> = _serviceState
 
-    private val _serviceStats = MutableStateFlow<RelayService.ServiceStats?>(null)
-    val serviceStats: StateFlow<RelayService.ServiceStats?> = _serviceStats
+    private val _serviceStats = MutableStateFlow<RelayEngine.Stats?>(null)
+    val serviceStats: StateFlow<RelayEngine.Stats?> = _serviceStats
 
     private val _logMessages = MutableStateFlow<List<LogMessage>>(emptyList())
     val logMessages: StateFlow<List<LogMessage>> = _logMessages

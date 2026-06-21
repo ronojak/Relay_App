@@ -74,7 +74,7 @@ class MainActivity : ComponentActivity() {
     repeatOnLifecycle(Lifecycle.State.STARTED) {
         launch {
             serviceConnection.serviceState.collect { state ->
-                val running = (state == com.noahlangat.relay.service.RelayService.ServiceState.RUNNING)
+                val running = (state == com.noahlangat.relay.service.RelayEngine.State.RUNNING)
                 viewModel.setServiceRunning(running)
             }
         }

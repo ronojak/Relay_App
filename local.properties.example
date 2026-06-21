@@ -1,0 +1,6 @@
+# Copy this file to local.properties (which is gitignored) and adjust sdk.dir
+# to point at your Android SDK installation. Gradle uses this to locate the SDK.
+#
+# Without local.properties (or an ANDROID_HOME / ANDROID_SDK_ROOT env var),
+# the build fails with: "SDK location not found".
+sdk.dir=C\:\\android

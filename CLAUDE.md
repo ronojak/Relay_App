@@ -329,7 +329,7 @@ java -version  # Should show version 17
 ```bash
 # Clone repository
 git clone <repo-url>
-cd Relay_App
+cd relay
 
 # Make gradlew executable (macOS/Linux)
 chmod +x gradlew

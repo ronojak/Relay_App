@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,6 +15,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -22,7 +25,8 @@ import androidx.compose.ui.unit.dp
 fun LogViewer(
     logMessages: List<LogMessage>,
     modifier: Modifier = Modifier,
-    onClearLogs: () -> Unit = {}
+    onClearLogs: () -> Unit = {},
+    onExpand: () -> Unit = {}
 ) {
     var selectedLogLevel by remember { mutableStateOf<LogLevel?>(null) }
     var selectedDevice by remember { mutableStateOf<String?>(null) }
@@ -53,7 +57,7 @@ fun LogViewer(
                     style = MaterialTheme.typography.titleMedium
                 )
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
@@ -61,6 +65,9 @@ fun LogViewer(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    TextButton(onClick = onExpand) {
+                        Text("Full screen")
+                    }
                     IconButton(
                         onClick = onClearLogs,
                         modifier = Modifier.size(32.dp)
@@ -146,7 +153,8 @@ private fun LogLevelColor(level: LogLevel): Color {
 @Composable
 private fun LogMessageItem(
     message: LogMessage,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    expanded: Boolean = false
 ) {
     Row(
         modifier = modifier
@@ -176,8 +184,8 @@ private fun LogMessageItem(
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
+            maxLines = if (expanded) Int.MAX_VALUE else 2,
+            overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis
             )
         Text(
             text = message.getFormattedTimestamp(),
@@ -282,6 +290,115 @@ private fun DeviceFilter(
                         expanded = false
                     }
                 )
+            }
+        }
+    }
+}
+
+/** Full-screen, untruncated view of the device messages with filters and copy. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LogsScreen(
+    logMessages: List<LogMessage>,
+    onClearLogs: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var selectedLogLevel by remember { mutableStateOf<LogLevel?>(null) }
+    var selectedDevice by remember { mutableStateOf<String?>(null) }
+    val clipboard = LocalClipboardManager.current
+
+    val filteredMessages = logMessages.filter { message ->
+        val levelMatch = selectedLogLevel == null || message.level == selectedLogLevel
+        val deviceMatch = selectedDevice == null || message.getDeviceLabel() == selectedDevice
+        levelMatch && deviceMatch
+    }
+    val uniqueDevices = logMessages.map { it.getDeviceLabel() }.distinct().sorted()
+
+    Scaffold(
+        modifier = modifier,
+        topBar = {
+            TopAppBar(
+                title = { Text("Device Messages") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    TextButton(
+                        onClick = {
+                            val text = filteredMessages.joinToString("\n") {
+                                "${it.getFormattedTimestamp()} ${it.getDeviceLabel()} ${it.level} ${it.message}"
+                            }
+                            clipboard.setText(AnnotatedString(text))
+                        },
+                        enabled = filteredMessages.isNotEmpty()
+                    ) { Text("Copy") }
+                    IconButton(onClick = onClearLogs, enabled = logMessages.isNotEmpty()) {
+                        Icon(Icons.Default.Clear, contentDescription = "Clear logs")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                LogLevelFilter(
+                    selectedLevel = selectedLogLevel,
+                    onLevelSelected = { selectedLogLevel = it },
+                    modifier = Modifier.weight(1f)
+                )
+                DeviceFilter(
+                    selectedDevice = selectedDevice,
+                    devices = uniqueDevices,
+                    onDeviceSelected = { selectedDevice = it },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            val listState = rememberLazyListState()
+            LaunchedEffect(filteredMessages.size) {
+                if (filteredMessages.isNotEmpty()) {
+                    listState.animateScrollToItem(filteredMessages.size - 1)
+                }
+            }
+
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentPadding = PaddingValues(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (filteredMessages.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "No messages to display",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    items(filteredMessages) { message ->
+                        LogMessageItem(message = message, expanded = true)
+                    }
+                }
             }
         }
     }

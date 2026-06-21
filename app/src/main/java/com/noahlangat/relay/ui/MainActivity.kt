@@ -116,6 +116,7 @@ class MainActivity : ComponentActivity() {
               ) {
                 var settingsOpen by remember { mutableStateOf(false) }
                 var telemetryOpen by remember { mutableStateOf(false) }
+                var logsOpen by remember { mutableStateOf(false) }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 if (settingsOpen) {
                     SettingsScreen(
@@ -145,11 +146,18 @@ class MainActivity : ComponentActivity() {
                         onClear = { viewModel.clearTelemetry() },
                         onBack = { telemetryOpen = false }
                     )
+                } else if (logsOpen) {
+                    LogsScreen(
+                        logMessages = uiState.logMessages,
+                        onClearLogs = { viewModel.clearLogMessages() },
+                        onBack = { logsOpen = false }
+                    )
                 } else {
                     MainScreen(
                         viewModel = viewModel,
                         onSettingsClick = { settingsOpen = true },
                         onTelemetryClick = { telemetryOpen = true },
+                        onExpandLogs = { logsOpen = true },
                         onStartService = {
                             Timber.i("MainActivity: Starting RelayService...")
                             val intent = Intent(
@@ -268,6 +276,7 @@ fun MainScreen(
     viewModel: MainViewModel,
     onSettingsClick: () -> Unit,
     onTelemetryClick: () -> Unit,
+    onExpandLogs: () -> Unit,
     onStartService: () -> Unit,
     onStopService: () -> Unit
 ) {
@@ -358,7 +367,8 @@ fun MainScreen(
 
             LogViewer(
                 logMessages = uiState.logMessages,
-                onClearLogs = { viewModel.clearLogMessages() }
+                onClearLogs = { viewModel.clearLogMessages() },
+                onExpand = onExpandLogs
             )
         }
     }

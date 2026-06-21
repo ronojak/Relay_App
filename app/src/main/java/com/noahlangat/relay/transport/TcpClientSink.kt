@@ -2,7 +2,6 @@ package com.noahlangat.relay.transport
 
 import android.content.Context
 import android.net.ConnectivityManager
-import android.net.Network
 import android.net.NetworkCapabilities
 import com.noahlangat.relay.ui.components.LogLevel
 import com.noahlangat.relay.ui.components.LogMessage
@@ -74,12 +73,14 @@ class TcpClientSink(
             if (output == null) {
                 try {
                     _state.value = LinkState.STARTING
-                    emitLog("Connecting to $host:$port…")
+                    val remote = InetSocketAddress(host, port)
+                    val resolved = remote.address?.hostAddress ?: host
+                    emitLog("Dialing $resolved:${remote.port}" + if (remote.isUnresolved) " (UNRESOLVED)" else "")
                     val s = withContext(Dispatchers.IO) {
                         Socket().apply {
                             tcpNoDelay = true
-                            bindToLanNetwork(this)
-                            connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
+                            maybeBindToLan(this)
+                            connect(remote, CONNECT_TIMEOUT_MS)
                         }
                     }
                     socket = s
@@ -101,12 +102,23 @@ class TcpClientSink(
     }
 
     /**
-     * Best-effort: bind [socket] to a Wi-Fi/Ethernet network so a LAN peripheral
-     * is reachable even when the default route is cellular. No-op if unavailable.
+     * Bind [socket] to a Wi-Fi/Ethernet network ONLY when the default route is not
+     * already LAN-capable (i.e. cellular is the default). When the phone is on
+     * Wi-Fi we leave the socket unbound so it behaves like an ordinary client and
+     * uses normal routing.
      */
-    private fun bindToLanNetwork(socket: Socket) {
+    private fun maybeBindToLan(socket: Socket) {
         runCatching {
             val cm = context.getSystemService(ConnectivityManager::class.java) ?: return
+            val activeCaps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+            val activeIsLan = activeCaps?.let {
+                it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                    it.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+            } == true
+            if (activeIsLan) {
+                emitLog("Using default (Wi-Fi/Ethernet) route", LogLevel.DEBUG)
+                return
+            }
             val lan = cm.allNetworks.firstOrNull { network ->
                 cm.getNetworkCapabilities(network)?.let { caps ->
                     caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
@@ -115,6 +127,7 @@ class TcpClientSink(
             }
             if (lan != null) {
                 lan.bindSocket(socket)
+                emitLog("Bound socket to Wi-Fi/Ethernet network (default was cellular)", LogLevel.DEBUG)
             }
         }
     }

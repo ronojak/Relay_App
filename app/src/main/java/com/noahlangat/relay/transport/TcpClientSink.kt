@@ -11,7 +11,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -69,65 +68,63 @@ class TcpClientSink(
         return true
     }
 
+    /**
+     * One connection attempt. A failed connect or a lost/closed connection both
+     * resolve to [LinkState.ERROR] (server offline) — we do NOT retry, because the
+     * relay can't function without the server and the service stops in that case.
+     */
     private suspend fun connectLoop() {
-        var backoffMs = INITIAL_BACKOFF_MS
-        while (currentCoroutineContext().isActive) {
-            val remote = InetSocketAddress(host, port)
-            val connected = try {
-                _state.value = LinkState.STARTING
-                val resolved = remote.address?.hostAddress ?: host
-                emitLog("Dialing $resolved:${remote.port}" + if (remote.isUnresolved) " (UNRESOLVED)" else "")
-                val s = withContext(Dispatchers.IO) {
-                    Socket().apply {
-                        tcpNoDelay = true
-                        keepAlive = true
-                        maybeBindToLan(this)
-                        connect(remote, CONNECT_TIMEOUT_MS)
-                    }
-                }
-                socket = s
-                output = withContext(Dispatchers.IO) { s.getOutputStream() }
-                _state.value = LinkState.ACTIVE
-                emitLog("Connected to $host:$port")
-                backoffMs = INITIAL_BACKOFF_MS
-                s
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                closeQuietly()
-                _state.value = LinkState.READY
-                emitLog("Connect to $host:$port failed: ${e.message}; retrying in ${backoffMs}ms", LogLevel.WARN)
-                delay(backoffMs)
-                backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
-                null
-            } ?: continue
-
-            // Connected: block on reads so a server-side close (EOF) is detected
-            // promptly, even when there is no outgoing traffic to fail a write.
-            try {
-                val input = withContext(Dispatchers.IO) { connected.getInputStream() }
-                val buffer = ByteArray(READ_BUFFER_BYTES)
-                while (currentCoroutineContext().isActive) {
-                    val read = withContext(Dispatchers.IO) { input.read(buffer) }
-                    if (read < 0) {
-                        emitLog("Server closed the connection", LogLevel.WARN)
-                        break
-                    }
-                    // Inbound bytes (acks/return traffic) are currently ignored.
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                if (currentCoroutineContext().isActive) {
-                    emitLog("Connection lost: ${e.message}", LogLevel.WARN)
+        val remote = InetSocketAddress(host, port)
+        val connected = try {
+            _state.value = LinkState.STARTING
+            val resolved = remote.address?.hostAddress ?: host
+            emitLog("Dialing $resolved:${remote.port}" + if (remote.isUnresolved) " (UNRESOLVED)" else "")
+            val s = withContext(Dispatchers.IO) {
+                Socket().apply {
+                    tcpNoDelay = true
+                    keepAlive = true
+                    maybeBindToLan(this)
+                    connect(remote, CONNECT_TIMEOUT_MS)
                 }
             }
-
+            socket = s
+            output = withContext(Dispatchers.IO) { s.getOutputStream() }
+            _state.value = LinkState.ACTIVE
+            emitLog("Connected to $host:$port")
+            s
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
             closeQuietly()
-            if (currentCoroutineContext().isActive) {
-                _state.value = LinkState.READY
-                delay(RECONNECT_DELAY_MS)
+            _state.value = LinkState.ERROR
+            emitLog("Connect to $host:$port failed: ${e.message}", LogLevel.ERROR)
+            return
+        }
+
+        // Connected: block on reads so a server-side close (EOF) is detected
+        // promptly, even with no outgoing traffic to fail a write.
+        try {
+            val input = withContext(Dispatchers.IO) { connected.getInputStream() }
+            val buffer = ByteArray(READ_BUFFER_BYTES)
+            while (currentCoroutineContext().isActive) {
+                val read = withContext(Dispatchers.IO) { input.read(buffer) }
+                if (read < 0) {
+                    emitLog("Server closed the connection", LogLevel.WARN)
+                    break
+                }
+                // Inbound bytes (acks/return traffic) are currently ignored.
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (currentCoroutineContext().isActive) {
+                emitLog("Connection lost: ${e.message}", LogLevel.WARN)
+            }
+        }
+
+        closeQuietly()
+        if (currentCoroutineContext().isActive) {
+            _state.value = LinkState.ERROR
         }
     }
 
@@ -198,9 +195,6 @@ class TcpClientSink(
 
     companion object {
         private const val CONNECT_TIMEOUT_MS = 5000
-        private const val INITIAL_BACKOFF_MS = 500L
-        private const val MAX_BACKOFF_MS = 10_000L
-        private const val RECONNECT_DELAY_MS = 500L
         private const val READ_BUFFER_BYTES = 256
     }
 }

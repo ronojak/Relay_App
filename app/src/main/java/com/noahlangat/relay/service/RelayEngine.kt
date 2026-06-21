@@ -146,6 +146,16 @@ class RelayEngine @Inject constructor(
                 launch {
                     sink.state.collect { linkState ->
                         updateStats { it.copy(networkClients = if (linkState == LinkState.ACTIVE) 1 else 0) }
+                        // Primary (server) unavailable -> nothing can be relayed, so error out;
+                        // the service observes this and stops itself.
+                        if (linkState == LinkState.ERROR && _state.value == State.RUNNING) {
+                            addLogMessage(
+                                message = "Primary server offline — stopping relay (frames cannot be delivered)",
+                                level = LogLevel.WARN,
+                                source = LogSource.NETWORK
+                            )
+                            _state.value = State.ERROR
+                        }
                     }
                 }
 

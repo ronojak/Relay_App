@@ -14,6 +14,7 @@ import com.noahlangat.relay.bluetooth.BluetoothManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.StateFlow
@@ -38,6 +39,7 @@ class RelayService : Service() {
     lateinit var engine: RelayEngine
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var autoStopJob: Job? = null
 
     // Re-exposed engine flows for bound clients (see RelayServiceConnection).
     val serviceState: StateFlow<RelayEngine.State> get() = engine.state
@@ -75,13 +77,14 @@ class RelayService : Service() {
         }
 
         startForeground(NOTIFICATION_ID, createForegroundNotification())
-        engine.start()
-        startNotificationUpdates()
+        beginRelay()
     }
 
     private fun stopRelayService() {
         if (engine.state.value == RelayEngine.State.STOPPED) return
 
+        autoStopJob?.cancel()
+        autoStopJob = null
         engine.stop()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -91,8 +94,23 @@ class RelayService : Service() {
     private fun restartRelayService() {
         startForeground(NOTIFICATION_ID, createForegroundNotification())
         engine.stop()
+        beginRelay()
+    }
+
+    private fun beginRelay() {
         engine.start()
         startNotificationUpdates()
+        // Stop the whole service if the relay errors out (e.g. primary server
+        // offline) — there's nothing to relay to.
+        autoStopJob?.cancel()
+        autoStopJob = serviceScope.launch {
+            engine.state.collect { state ->
+                if (state == RelayEngine.State.ERROR) {
+                    Timber.w("Relay entered ERROR — stopping service")
+                    stopRelayService()
+                }
+            }
+        }
     }
 
     private fun startNotificationUpdates() {

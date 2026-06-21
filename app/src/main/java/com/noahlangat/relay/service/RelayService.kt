@@ -60,6 +60,7 @@ class RelayService : Service() {
         Timber.i("RelayService onStartCommand - action: ${intent?.action}")
         when (intent?.action) {
             ACTION_STOP_RELAY -> stopRelayService()
+            ACTION_RESTART_RELAY -> restartRelayService()
             else -> startRelayService()
         }
         return START_STICKY
@@ -84,6 +85,14 @@ class RelayService : Service() {
         engine.stop()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    /** Apply a changed primary configuration by rebuilding the relay in place. */
+    private fun restartRelayService() {
+        startForeground(NOTIFICATION_ID, createForegroundNotification())
+        engine.stop()
+        engine.start()
+        startNotificationUpdates()
     }
 
     private fun startNotificationUpdates() {
@@ -181,6 +190,6 @@ class RelayService : Service() {
 
         const val ACTION_START_RELAY = "com.noahlangat.relay.START_RELAY"
         const val ACTION_STOP_RELAY = "com.noahlangat.relay.STOP_RELAY"
-        const val EXTRA_PORT = "extra_port"
+        const val ACTION_RESTART_RELAY = "com.noahlangat.relay.RESTART_RELAY"
     }
 }

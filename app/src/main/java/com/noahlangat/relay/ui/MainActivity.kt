@@ -111,19 +111,18 @@ class MainActivity : ComponentActivity() {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 if (settingsOpen) {
                     SettingsScreen(
-                        currentPort = uiState.serverPort,
-                        onPortChange = { port ->
-                            viewModel.updatePort(port)
-                            val intentStop = Intent(this, RelayService::class.java).apply {
-                                action = RelayService.ACTION_STOP_RELAY
-                            }
-                            val intentStart = Intent(this, RelayService::class.java).apply {
-                                action = RelayService.ACTION_START_RELAY
-                                putExtra(RelayService.EXTRA_PORT, port.toIntOrNull() ?: 6543)
-                            }
-                            startService(intentStop)
-                            startForegroundService(intentStart)
-                },
+                        primaryMode = uiState.primaryMode,
+                        primaryHost = uiState.primaryHost,
+                        primaryPort = uiState.primaryPort,
+                        onApply = { mode, host, port ->
+                            viewModel.applyPrimarySettings(mode, host, port)
+                            // Auto-restart the relay so the new primary takes effect.
+                            startForegroundService(
+                                Intent(this, RelayService::class.java).apply {
+                                    action = RelayService.ACTION_RESTART_RELAY
+                                }
+                            )
+                        },
                         onBack = { settingsOpen = false }
                     )
                 } else {

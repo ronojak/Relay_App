@@ -18,13 +18,21 @@ import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** How the phone's primary (output) connection is established. */
-enum class PrimaryMode {
-    /** Phone dials out to the peripheral/MCU at [RelaySettings.primaryHost]:[RelaySettings.primaryPort]. */
-    CLIENT,
+/** Available primary (output) transports. The MCU is always the server/peripheral. */
+enum class SinkType(val displayName: String) {
+    /** Phone dials out to the MCU at [RelaySettings.primaryHost]:[RelaySettings.primaryPort]. */
+    WIFI_CLIENT("WiFi · dial out"),
 
-    /** Phone listens; the peripheral dials in. (Legacy/alternate topology.) */
-    SERVER
+    /** Phone listens; the peripheral dials in. (Alternate topology.) */
+    WIFI_SERVER("WiFi · listen"),
+
+    /** Phone connects to the MCU over Bluetooth. (Implemented in Phase 4.) */
+    BLUETOOTH("Bluetooth")
+}
+
+/** Available secondary (input) transports. */
+enum class SourceType(val displayName: String) {
+    BLUETOOTH_HID("Bluetooth Gamepad")
 }
 
 /** App appearance preference. */
@@ -32,7 +40,8 @@ enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 /** User-configurable relay settings. */
 data class RelaySettings(
-    val primaryMode: PrimaryMode = PrimaryMode.CLIENT,
+    val sinkType: SinkType = SinkType.WIFI_CLIENT,
+    val sourceType: SourceType = SourceType.BLUETOOTH_HID,
     val primaryHost: String = "",
     val primaryPort: Int = ProtocolConstants.DEFAULT_TCP_PORT,
     val themeMode: ThemeMode = ThemeMode.SYSTEM
@@ -56,7 +65,9 @@ class RelaySettingsRepository @Inject constructor(
     val settings: StateFlow<RelaySettings> = _settings
 
     private object Keys {
-        val MODE = stringPreferencesKey("primary_mode")
+        val LEGACY_MODE = stringPreferencesKey("primary_mode")
+        val SINK = stringPreferencesKey("sink_type")
+        val SOURCE = stringPreferencesKey("source_type")
         val HOST = stringPreferencesKey("primary_host")
         val PORT = intPreferencesKey("primary_port")
         val THEME = stringPreferencesKey("theme_mode")
@@ -67,9 +78,10 @@ class RelaySettingsRepository @Inject constructor(
             runCatching {
                 val prefs = context.dataStore.data.first()
                 _settings.value = RelaySettings(
-                    primaryMode = prefs[Keys.MODE]
-                        ?.let { runCatching { PrimaryMode.valueOf(it) }.getOrNull() }
-                        ?: RelaySettings().primaryMode,
+                    sinkType = readSinkType(prefs[Keys.SINK], prefs[Keys.LEGACY_MODE]),
+                    sourceType = prefs[Keys.SOURCE]
+                        ?.let { runCatching { SourceType.valueOf(it) }.getOrNull() }
+                        ?: RelaySettings().sourceType,
                     primaryHost = prefs[Keys.HOST] ?: "",
                     primaryPort = prefs[Keys.PORT] ?: ProtocolConstants.DEFAULT_TCP_PORT,
                     themeMode = prefs[Keys.THEME]
@@ -80,15 +92,27 @@ class RelaySettingsRepository @Inject constructor(
         }
     }
 
+    /** Resolve the sink type, migrating the legacy CLIENT/SERVER primary_mode key. */
+    private fun readSinkType(stored: String?, legacy: String?): SinkType {
+        stored?.let { runCatching { SinkType.valueOf(it) }.getOrNull() }?.let { return it }
+        return when (legacy) {
+            "CLIENT" -> SinkType.WIFI_CLIENT
+            "SERVER" -> SinkType.WIFI_SERVER
+            else -> RelaySettings().sinkType
+        }
+    }
+
     /** Update settings in memory immediately and persist asynchronously. */
     fun update(
-        mode: PrimaryMode? = null,
+        sinkType: SinkType? = null,
+        sourceType: SourceType? = null,
         host: String? = null,
         port: Int? = null,
         themeMode: ThemeMode? = null
     ) {
         _settings.value = _settings.value.copy(
-            primaryMode = mode ?: _settings.value.primaryMode,
+            sinkType = sinkType ?: _settings.value.sinkType,
+            sourceType = sourceType ?: _settings.value.sourceType,
             primaryHost = host ?: _settings.value.primaryHost,
             primaryPort = port ?: _settings.value.primaryPort,
             themeMode = themeMode ?: _settings.value.themeMode
@@ -96,7 +120,8 @@ class RelaySettingsRepository @Inject constructor(
         scope.launch {
             runCatching {
                 context.dataStore.edit { prefs ->
-                    mode?.let { prefs[Keys.MODE] = it.name }
+                    sinkType?.let { prefs[Keys.SINK] = it.name }
+                    sourceType?.let { prefs[Keys.SOURCE] = it.name }
                     host?.let { prefs[Keys.HOST] = it }
                     port?.let { prefs[Keys.PORT] = it }
                     themeMode?.let { prefs[Keys.THEME] = it.name }

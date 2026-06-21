@@ -1,19 +1,14 @@
 package com.noahlangat.relay.service
 
-import com.noahlangat.relay.bluetooth.BluetoothManager
-import com.noahlangat.relay.bluetooth.GamepadInputHandler
-import com.noahlangat.relay.data.PrimaryMode
 import com.noahlangat.relay.data.RelaySettingsRepository
 import com.noahlangat.relay.protocol.GamepadState
 import com.noahlangat.relay.protocol.MessageSerializer
 import com.noahlangat.relay.telemetry.FrameDirection
 import com.noahlangat.relay.telemetry.TelemetryRepository
-import com.noahlangat.relay.transport.BluetoothHidSource
 import com.noahlangat.relay.transport.LinkState
 import com.noahlangat.relay.transport.SinkTransport
 import com.noahlangat.relay.transport.SourceTransport
-import com.noahlangat.relay.transport.TcpClientSink
-import com.noahlangat.relay.transport.TcpServerSink
+import com.noahlangat.relay.transport.TransportFactory
 import com.noahlangat.relay.ui.components.LogLevel
 import com.noahlangat.relay.ui.components.LogMessage
 import com.noahlangat.relay.ui.components.LogSource
@@ -38,17 +33,16 @@ import javax.inject.Singleton
  */
 @Singleton
 class RelayEngine @Inject constructor(
-    bluetoothManager: BluetoothManager,
-    gamepadInputHandler: GamepadInputHandler,
+    private val factory: TransportFactory,
     private val settings: RelaySettingsRepository,
     private val telemetry: TelemetryRepository
 ) {
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    // Source is fixed (Bluetooth gamepad). The sink is built per-start from the
-    // configured primary connection (Phase 3 makes both fully reassignable).
-    private val source: SourceTransport = BluetoothHidSource(bluetoothManager, gamepadInputHandler)
+    // Both transports are built per-start from the current settings, so changing
+    // the configured source/sink and restarting swaps them at runtime.
+    private var activeSource: SourceTransport? = null
     private var activeSink: SinkTransport? = null
 
     /** Monotonic protocol sequence number (was previously owned by the TCP server). */
@@ -108,10 +102,13 @@ class RelayEngine @Inject constructor(
             try {
                 Timber.i("Starting gamepad relay")
 
-                val sink = buildSink()
+                val cfg = settings.settings.value
+                val source = factory.createSource(cfg, this)
+                val sink = factory.createSink(cfg, scope)
+                activeSource = source
                 activeSink = sink
                 addLogMessage(
-                    message = "Primary connection: ${sink.displayName}",
+                    message = "Input: ${source.displayName} • Primary: ${sink.displayName}",
                     level = LogLevel.INFO,
                     source = LogSource.NETWORK
                 )
@@ -282,7 +279,8 @@ class RelayEngine @Inject constructor(
         _state.value = State.STOPPING
         runJob?.cancel()
         runJob = null
-        source.stop()
+        activeSource?.stop()
+        activeSource = null
         activeSink?.let { s -> scope.launch { s.stop() } }
         activeSink = null
         _state.value = State.STOPPED
@@ -306,15 +304,6 @@ class RelayEngine @Inject constructor(
     }
 
     fun getCurrentClientInfo(): String? = activeSink?.peerInfo
-
-    /** Build the primary/output sink from the configured connection settings. */
-    private fun buildSink(): SinkTransport {
-        val cfg = settings.settings.value
-        return when (cfg.primaryMode) {
-            PrimaryMode.CLIENT -> TcpClientSink(scope, cfg.primaryHost.trim(), cfg.primaryPort)
-            PrimaryMode.SERVER -> TcpServerSink(scope, cfg.primaryPort)
-        }
-    }
 
     private fun calculateLatency(): Float {
         return if (activeSink?.state?.value == LinkState.ACTIVE) {

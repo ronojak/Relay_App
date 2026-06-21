@@ -3,8 +3,8 @@ package com.noahlangat.relay.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.noahlangat.relay.bluetooth.BluetoothManager
-import com.noahlangat.relay.data.PrimaryMode
 import com.noahlangat.relay.data.RelaySettingsRepository
+import com.noahlangat.relay.data.SinkType
 import com.noahlangat.relay.data.ThemeMode
 import com.noahlangat.relay.protocol.ProtocolConstants
 import com.noahlangat.relay.telemetry.TelemetryRepository
@@ -72,7 +72,7 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.settings.collect { s ->
                 _uiState.value = _uiState.value.copy(
-                    primaryMode = s.primaryMode,
+                    sinkType = s.sinkType,
                     primaryHost = s.primaryHost,
                     primaryPort = s.primaryPort,
                     serverPort = s.primaryPort.toString()
@@ -83,9 +83,9 @@ class MainViewModel @Inject constructor(
     }
 
     /** Persist a new primary-connection configuration. Caller restarts the relay to apply. */
-    fun applyPrimarySettings(mode: PrimaryMode, host: String, port: Int) {
-        Timber.i("Applying primary settings: mode=$mode host=$host port=$port")
-        settingsRepository.update(mode = mode, host = host, port = port)
+    fun applyPrimarySettings(sinkType: SinkType, host: String, port: Int) {
+        Timber.i("Applying primary settings: sink=$sinkType host=$host port=$port")
+        settingsRepository.update(sinkType = sinkType, host = host, port = port)
     }
     
     fun onBluetoothPermissionGranted() {
@@ -260,7 +260,7 @@ data class MainUiState(
     val connectedDevices: List<BluetoothManager.GamepadDevice> = emptyList(),
     val isDiscovering: Boolean = false,
     val serverPort: String = "26543",
-    val primaryMode: PrimaryMode = PrimaryMode.CLIENT,
+    val sinkType: SinkType = SinkType.WIFI_CLIENT,
     val primaryHost: String = "",
     val primaryPort: Int = ProtocolConstants.DEFAULT_TCP_PORT,
     val clientInfo: String? = null,

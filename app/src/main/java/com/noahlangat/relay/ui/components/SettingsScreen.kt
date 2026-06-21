@@ -7,30 +7,31 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.noahlangat.relay.data.PrimaryMode
+import com.noahlangat.relay.data.SinkType
 import com.noahlangat.relay.data.ThemeMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    primaryMode: PrimaryMode,
+    sinkType: SinkType,
     primaryHost: String,
     primaryPort: Int,
     themeMode: ThemeMode,
     onThemeChange: (ThemeMode) -> Unit,
-    onApply: (mode: PrimaryMode, host: String, port: Int) -> Unit,
+    onApply: (sinkType: SinkType, host: String, port: Int) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var mode by remember(primaryMode) { mutableStateOf(primaryMode) }
+    var type by remember(sinkType) { mutableStateOf(sinkType) }
     var hostText by remember(primaryHost) { mutableStateOf(primaryHost) }
     var portText by remember(primaryPort) { mutableStateOf(primaryPort.toString()) }
     var applied by remember { mutableStateOf(false) }
 
+    val isWifi = type == SinkType.WIFI_CLIENT || type == SinkType.WIFI_SERVER
     val portValue = portText.toIntOrNull()
     val portValid = portValue != null && portValue in 1..65535
-    val hostValid = mode == PrimaryMode.SERVER || hostText.isNotBlank()
-    val canApply = portValid && hostValid
+    val hostValid = type != SinkType.WIFI_CLIENT || hostText.isNotBlank()
+    val canApply = isWifi && portValid && hostValid
 
     Column(
         modifier = modifier.fillMaxSize().padding(24.dp),
@@ -39,23 +40,29 @@ fun SettingsScreen(
         Text(text = "Primary Connection", style = MaterialTheme.typography.titleLarge)
 
         Text(
-            text = "The peripheral (MCU) is the server. In Client mode the phone dials out to " +
-                "its IP:port. Use Client mode to test against relay_test_server.py --role sink.",
+            text = "The peripheral (MCU) is the server. Use WiFi · dial out to test against " +
+                "relay_test_server.py --role sink at its IP:port.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        // Mode selector
+        // Sink type selector
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
-                selected = mode == PrimaryMode.CLIENT,
-                onClick = { mode = PrimaryMode.CLIENT },
-                label = { Text("Client (dial out)") }
+                selected = type == SinkType.WIFI_CLIENT,
+                onClick = { type = SinkType.WIFI_CLIENT },
+                label = { Text(SinkType.WIFI_CLIENT.displayName) }
             )
             FilterChip(
-                selected = mode == PrimaryMode.SERVER,
-                onClick = { mode = PrimaryMode.SERVER },
-                label = { Text("Server (listen)") }
+                selected = type == SinkType.WIFI_SERVER,
+                onClick = { type = SinkType.WIFI_SERVER },
+                label = { Text(SinkType.WIFI_SERVER.displayName) }
+            )
+            FilterChip(
+                selected = type == SinkType.BLUETOOTH,
+                onClick = { /* Phase 4 */ },
+                enabled = false,
+                label = { Text("Bluetooth · soon") }
             )
         }
 
@@ -65,12 +72,12 @@ fun SettingsScreen(
             onValueChange = { hostText = it.trim() },
             label = { Text("Peripheral IP / host") },
             singleLine = true,
-            enabled = mode == PrimaryMode.CLIENT,
-            isError = mode == PrimaryMode.CLIENT && hostText.isBlank(),
+            enabled = type == SinkType.WIFI_CLIENT,
+            isError = type == SinkType.WIFI_CLIENT && hostText.isBlank(),
             supportingText = {
                 Text(
-                    if (mode == PrimaryMode.CLIENT) "e.g. 192.168.1.100 (the PC running the test server)"
-                    else "Not used in Server mode (the phone listens on all interfaces)."
+                    if (type == SinkType.WIFI_CLIENT) "e.g. 192.168.1.100 (the PC running the test server)"
+                    else "Not used when the phone listens (the peripheral dials in)."
                 )
             },
             modifier = Modifier.fillMaxWidth()
@@ -80,7 +87,7 @@ fun SettingsScreen(
         OutlinedTextField(
             value = portText,
             onValueChange = { portText = it.filter { c -> c.isDigit() }.take(5) },
-            label = { Text(if (mode == PrimaryMode.CLIENT) "Peripheral port" else "Listening port") },
+            label = { Text(if (type == SinkType.WIFI_CLIENT) "Peripheral port" else "Listening port") },
             singleLine = true,
             isError = !portValid,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -90,7 +97,7 @@ fun SettingsScreen(
 
         Button(
             onClick = {
-                onApply(mode, hostText.trim(), portValue ?: primaryPort)
+                onApply(type, hostText.trim(), portValue ?: primaryPort)
                 applied = true
             },
             enabled = canApply
@@ -99,7 +106,7 @@ fun SettingsScreen(
         }
 
         if (applied) {
-            val target = if (mode == PrimaryMode.CLIENT) "$hostText:$portText" else "port $portText"
+            val target = if (type == SinkType.WIFI_CLIENT) "$hostText:$portText" else "port $portText"
             Snackbar { Text("Relay restarting • $target") }
         }
 

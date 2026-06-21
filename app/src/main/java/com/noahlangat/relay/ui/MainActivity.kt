@@ -41,7 +41,7 @@ import com.noahlangat.relay.ui.theme.RelayAppTheme
 import dagger.hilt.android.AndroidEntryPoint
 import timber.log.Timber
 import javax.inject.Inject
-import com.noahlangat.relay.data.PrimaryMode
+import com.noahlangat.relay.data.SinkType
 import com.noahlangat.relay.service.RelayService
 import com.noahlangat.relay.ui.components.SettingsScreen
 
@@ -115,7 +115,7 @@ class MainActivity : ComponentActivity() {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 if (settingsOpen) {
                     SettingsScreen(
-                        primaryMode = uiState.primaryMode,
+                        sinkType = uiState.sinkType,
                         primaryHost = uiState.primaryHost,
                         primaryPort = uiState.primaryPort,
                         themeMode = themeMode,
@@ -311,8 +311,12 @@ fun MainScreen(
         ) {
             val sourceActive = uiState.connectedDevices.any { it.isConnected }
             val sinkActive = uiState.clientInfo != null
-            val sinkLabel = if (uiState.primaryMode == PrimaryMode.CLIENT) "WiFi" else "WiFi listen"
-            val sinkDetail = if (uiState.primaryMode == PrimaryMode.CLIENT) {
+            val sinkLabel = when (uiState.sinkType) {
+                SinkType.WIFI_CLIENT -> "WiFi"
+                SinkType.WIFI_SERVER -> "WiFi listen"
+                SinkType.BLUETOOTH -> "Bluetooth"
+            }
+            val sinkDetail = if (uiState.sinkType == SinkType.WIFI_CLIENT) {
                 if (uiState.primaryHost.isBlank()) "not set" else "${uiState.primaryHost}:${uiState.primaryPort}"
             } else {
                 "port ${uiState.primaryPort}"

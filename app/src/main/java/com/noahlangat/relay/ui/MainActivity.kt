@@ -110,6 +110,10 @@ class MainActivity : ComponentActivity() {
  setContent {
                 val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     RelayAppTheme(themeMode = themeMode) {
+              Surface(
+                  modifier = Modifier.fillMaxSize(),
+                  color = MaterialTheme.colorScheme.background
+              ) {
                 var settingsOpen by remember { mutableStateOf(false) }
                 var telemetryOpen by remember { mutableStateOf(false) }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -168,6 +172,7 @@ class MainActivity : ComponentActivity() {
     }
             )
                 }
+              }
             }
 }
 

@@ -1,10 +1,12 @@
 package com.noahlangat.relay.transport
 
+import android.content.Context
 import com.noahlangat.relay.bluetooth.BluetoothManager
 import com.noahlangat.relay.bluetooth.GamepadInputHandler
 import com.noahlangat.relay.data.RelaySettings
 import com.noahlangat.relay.data.SinkType
 import com.noahlangat.relay.data.SourceType
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -17,6 +19,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class TransportFactory @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val bluetoothManager: BluetoothManager,
     private val gamepadInputHandler: GamepadInputHandler
 ) {
@@ -28,7 +31,7 @@ class TransportFactory @Inject constructor(
 
     fun createSink(settings: RelaySettings, scope: CoroutineScope): SinkTransport =
         when (settings.sinkType) {
-            SinkType.WIFI_CLIENT -> TcpClientSink(scope, settings.primaryHost.trim(), settings.primaryPort)
+            SinkType.WIFI_CLIENT -> TcpClientSink(context, scope, settings.primaryHost.trim(), settings.primaryPort)
             SinkType.WIFI_SERVER -> TcpServerSink(scope, settings.primaryPort)
             SinkType.BLUETOOTH -> throw UnsupportedOperationException(
                 "Bluetooth primary sink is not implemented yet (see docs/phase4-bluetooth-primary.md)"

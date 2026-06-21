@@ -1,5 +1,9 @@
 package com.noahlangat.relay.transport
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import com.noahlangat.relay.ui.components.LogLevel
 import com.noahlangat.relay.ui.components.LogMessage
 import com.noahlangat.relay.ui.components.LogSource
@@ -22,8 +26,13 @@ import java.net.Socket
  * Primary/output transport that dials OUT to a peripheral (MCU) acting as the
  * server, e.g. `relay_test_server.py --role sink` on a PC. Maintains the
  * connection with automatic reconnect/backoff and streams serialized frames.
+ *
+ * The socket is bound to the Wi-Fi/Ethernet network when available, so a LAN
+ * peripheral stays reachable even if the default route is cellular (a common
+ * cause of "connect fails although the IP is reachable from a PC").
  */
 class TcpClientSink(
+    private val context: Context,
     private val scope: CoroutineScope,
     private val host: String,
     private val port: Int
@@ -65,9 +74,11 @@ class TcpClientSink(
             if (output == null) {
                 try {
                     _state.value = LinkState.STARTING
+                    emitLog("Connecting to $host:$port…")
                     val s = withContext(Dispatchers.IO) {
                         Socket().apply {
                             tcpNoDelay = true
+                            bindToLanNetwork(this)
                             connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
                         }
                     }
@@ -86,6 +97,25 @@ class TcpClientSink(
                 }
             }
             delay(POLL_MS)
+        }
+    }
+
+    /**
+     * Best-effort: bind [socket] to a Wi-Fi/Ethernet network so a LAN peripheral
+     * is reachable even when the default route is cellular. No-op if unavailable.
+     */
+    private fun bindToLanNetwork(socket: Socket) {
+        runCatching {
+            val cm = context.getSystemService(ConnectivityManager::class.java) ?: return
+            val lan = cm.allNetworks.firstOrNull { network ->
+                cm.getNetworkCapabilities(network)?.let { caps ->
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                        caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+                } == true
+            }
+            if (lan != null) {
+                lan.bindSocket(socket)
+            }
         }
     }
 

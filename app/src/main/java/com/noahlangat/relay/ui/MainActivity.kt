@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -108,6 +109,7 @@ class MainActivity : ComponentActivity() {
  setContent {
     RelayAppTheme {
                 var settingsOpen by remember { mutableStateOf(false) }
+                var telemetryOpen by remember { mutableStateOf(false) }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 if (settingsOpen) {
                     SettingsScreen(
@@ -125,10 +127,21 @@ class MainActivity : ComponentActivity() {
                         },
                         onBack = { settingsOpen = false }
                     )
+                } else if (telemetryOpen) {
+                    val telemetryEnabled by viewModel.telemetryEnabled.collectAsStateWithLifecycle()
+                    val telemetryEvents by viewModel.telemetryEvents.collectAsStateWithLifecycle()
+                    TelemetryScreen(
+                        enabled = telemetryEnabled,
+                        events = telemetryEvents,
+                        onToggle = { viewModel.setTelemetryEnabled(it) },
+                        onClear = { viewModel.clearTelemetry() },
+                        onBack = { telemetryOpen = false }
+                    )
                 } else {
                     MainScreen(
                         viewModel = viewModel,
                         onSettingsClick = { settingsOpen = true },
+                        onTelemetryClick = { telemetryOpen = true },
                         onStartService = {
                             Timber.i("MainActivity: Starting RelayService...")
                             val intent = Intent(
@@ -245,6 +258,7 @@ class MainActivity : ComponentActivity() {
 fun MainScreen(
     viewModel: MainViewModel,
     onSettingsClick: () -> Unit,
+    onTelemetryClick: () -> Unit,
     onStartService: () -> Unit,
     onStopService: () -> Unit
 ) {
@@ -267,6 +281,12 @@ fun MainScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onTelemetryClick) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.List,
+                            contentDescription = "Telemetry"
+                        )
+                    }
                     IconButton(onClick = onSettingsClick) {
                         Icon(
                             Icons.Default.Settings,

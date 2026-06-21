@@ -6,6 +6,7 @@ import com.noahlangat.relay.bluetooth.BluetoothManager
 import com.noahlangat.relay.data.PrimaryMode
 import com.noahlangat.relay.data.RelaySettingsRepository
 import com.noahlangat.relay.protocol.ProtocolConstants
+import com.noahlangat.relay.telemetry.TelemetryRepository
 import com.noahlangat.relay.ui.components.LogMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,8 +19,17 @@ import javax.inject.Inject
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val bluetoothManager: BluetoothManager,
-    private val settingsRepository: RelaySettingsRepository
+    private val settingsRepository: RelaySettingsRepository,
+    private val telemetryRepository: TelemetryRepository
 ) : ViewModel() {
+
+    // Telemetry capture state, exposed directly (not folded into uiState to avoid
+    // re-emitting the whole UI state on every captured frame).
+    val telemetryEnabled: StateFlow<Boolean> = telemetryRepository.enabled
+    val telemetryEvents = telemetryRepository.events
+
+    fun setTelemetryEnabled(enabled: Boolean) = telemetryRepository.setEnabled(enabled)
+    fun clearTelemetry() = telemetryRepository.clear()
     
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState

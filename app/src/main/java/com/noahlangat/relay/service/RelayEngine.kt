@@ -6,6 +6,8 @@ import com.noahlangat.relay.data.PrimaryMode
 import com.noahlangat.relay.data.RelaySettingsRepository
 import com.noahlangat.relay.protocol.GamepadState
 import com.noahlangat.relay.protocol.MessageSerializer
+import com.noahlangat.relay.telemetry.FrameDirection
+import com.noahlangat.relay.telemetry.TelemetryRepository
 import com.noahlangat.relay.transport.BluetoothHidSource
 import com.noahlangat.relay.transport.LinkState
 import com.noahlangat.relay.transport.SinkTransport
@@ -38,7 +40,8 @@ import javax.inject.Singleton
 class RelayEngine @Inject constructor(
     bluetoothManager: BluetoothManager,
     gamepadInputHandler: GamepadInputHandler,
-    private val settings: RelaySettingsRepository
+    private val settings: RelaySettingsRepository,
+    private val telemetry: TelemetryRepository
 ) {
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -167,6 +170,13 @@ class RelayEngine @Inject constructor(
                             deviceId = gamepadState.deviceId.toInt(),
                             source = LogSource.GAMEPAD
                         )
+                        if (telemetry.isEnabled()) {
+                            telemetry.record(
+                                direction = FrameDirection.INCOMING_INPUT,
+                                label = source.displayName,
+                                summary = inputMessage
+                            )
+                        }
                     }
                 }
 
@@ -177,11 +187,21 @@ class RelayEngine @Inject constructor(
                         if (gamepadState != null) {
                             try {
                                 val currentTime = System.currentTimeMillis()
+                                val seqNum = sequence.incrementAndGet()
                                 val message = MessageSerializer.serializeGamepadMessage(
                                     gamepadState,
-                                    sequence.incrementAndGet()
+                                    seqNum
                                 )
                                 val success = sink.send(message)
+                                if (telemetry.isEnabled()) {
+                                    telemetry.record(
+                                        direction = FrameDirection.OUTGOING,
+                                        label = sink.displayName,
+                                        summary = if (success) "sent" else "not sent (no peer)",
+                                        seq = seqNum,
+                                        bytes = message
+                                    )
+                                }
                                 if (success) {
                                     updateStats { stats ->
                                         stats.copy(

@@ -27,11 +27,15 @@ enum class PrimaryMode {
     SERVER
 }
 
+/** App appearance preference. */
+enum class ThemeMode { SYSTEM, LIGHT, DARK }
+
 /** User-configurable relay settings. */
 data class RelaySettings(
     val primaryMode: PrimaryMode = PrimaryMode.CLIENT,
     val primaryHost: String = "",
-    val primaryPort: Int = ProtocolConstants.DEFAULT_TCP_PORT
+    val primaryPort: Int = ProtocolConstants.DEFAULT_TCP_PORT,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM
 )
 
 private val Context.dataStore by preferencesDataStore(name = "relay_settings")
@@ -55,6 +59,7 @@ class RelaySettingsRepository @Inject constructor(
         val MODE = stringPreferencesKey("primary_mode")
         val HOST = stringPreferencesKey("primary_host")
         val PORT = intPreferencesKey("primary_port")
+        val THEME = stringPreferencesKey("theme_mode")
     }
 
     init {
@@ -66,7 +71,10 @@ class RelaySettingsRepository @Inject constructor(
                         ?.let { runCatching { PrimaryMode.valueOf(it) }.getOrNull() }
                         ?: RelaySettings().primaryMode,
                     primaryHost = prefs[Keys.HOST] ?: "",
-                    primaryPort = prefs[Keys.PORT] ?: ProtocolConstants.DEFAULT_TCP_PORT
+                    primaryPort = prefs[Keys.PORT] ?: ProtocolConstants.DEFAULT_TCP_PORT,
+                    themeMode = prefs[Keys.THEME]
+                        ?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
+                        ?: RelaySettings().themeMode
                 )
             }.onFailure { Timber.w(it, "Failed to load relay settings") }
         }
@@ -76,12 +84,14 @@ class RelaySettingsRepository @Inject constructor(
     fun update(
         mode: PrimaryMode? = null,
         host: String? = null,
-        port: Int? = null
+        port: Int? = null,
+        themeMode: ThemeMode? = null
     ) {
         _settings.value = _settings.value.copy(
             primaryMode = mode ?: _settings.value.primaryMode,
             primaryHost = host ?: _settings.value.primaryHost,
-            primaryPort = port ?: _settings.value.primaryPort
+            primaryPort = port ?: _settings.value.primaryPort,
+            themeMode = themeMode ?: _settings.value.themeMode
         )
         scope.launch {
             runCatching {
@@ -89,6 +99,7 @@ class RelaySettingsRepository @Inject constructor(
                     mode?.let { prefs[Keys.MODE] = it.name }
                     host?.let { prefs[Keys.HOST] = it }
                     port?.let { prefs[Keys.PORT] = it }
+                    themeMode?.let { prefs[Keys.THEME] = it.name }
                 }
             }.onFailure { Timber.w(it, "Failed to persist relay settings") }
         }

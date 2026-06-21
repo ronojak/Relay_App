@@ -5,13 +5,17 @@ import androidx.lifecycle.viewModelScope
 import com.noahlangat.relay.bluetooth.BluetoothManager
 import com.noahlangat.relay.data.PrimaryMode
 import com.noahlangat.relay.data.RelaySettingsRepository
+import com.noahlangat.relay.data.ThemeMode
 import com.noahlangat.relay.protocol.ProtocolConstants
 import com.noahlangat.relay.telemetry.TelemetryRepository
 import com.noahlangat.relay.ui.components.LogMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
@@ -30,6 +34,12 @@ class MainViewModel @Inject constructor(
 
     fun setTelemetryEnabled(enabled: Boolean) = telemetryRepository.setEnabled(enabled)
     fun clearTelemetry() = telemetryRepository.clear()
+
+    val themeMode: StateFlow<ThemeMode> = settingsRepository.settings
+        .map { it.themeMode }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ThemeMode.SYSTEM)
+
+    fun setThemeMode(mode: ThemeMode) = settingsRepository.update(themeMode = mode)
     
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState
@@ -142,10 +152,6 @@ class MainViewModel @Inject constructor(
         Timber.w("Selected device: ${device?.name} (ID: $deviceId)")
     }
     
-    fun updatePort(port: String) {
-        _uiState.value = _uiState.value.copy(serverPort = port)
-    }
-    
     fun connectToDevice() {
         selectedDeviceId?.let { deviceId ->
             val device = _uiState.value.connectedDevices.find { it.id == deviceId }
@@ -245,19 +251,6 @@ class MainViewModel @Inject constructor(
     
     fun clearLogMessages() {
         _uiState.value = _uiState.value.copy(logMessages = emptyList())
-    }
-
-    // Mock data for UI preview - in real implementation this would come from services
-    private fun updateMockStats() {
-        _uiState.value = _uiState.value.copy(
-            packetsTransmitted = 15247L,
-            packetsDropped = 0L,
-            currentHz = 119.8f,
-            averageLatency = 23.4f,
-            p99Latency = 45.2f,
-            uptime = "02:34:18",
-            isServiceRunning = true
-        )
     }
 }
 

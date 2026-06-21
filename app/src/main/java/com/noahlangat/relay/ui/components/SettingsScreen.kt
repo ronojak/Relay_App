@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.noahlangat.relay.data.PrimaryMode
+import com.noahlangat.relay.data.ThemeMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -15,6 +16,8 @@ fun SettingsScreen(
     primaryMode: PrimaryMode,
     primaryHost: String,
     primaryPort: Int,
+    themeMode: ThemeMode,
+    onThemeChange: (ThemeMode) -> Unit,
     onApply: (mode: PrimaryMode, host: String, port: Int) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
@@ -98,6 +101,27 @@ fun SettingsScreen(
         if (applied) {
             val target = if (mode == PrimaryMode.CLIENT) "$hostText:$portText" else "port $portText"
             Snackbar { Text("Relay restarting • $target") }
+        }
+
+        HorizontalDivider()
+
+        Text(text = "Appearance", style = MaterialTheme.typography.titleLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = themeMode == ThemeMode.SYSTEM,
+                onClick = { onThemeChange(ThemeMode.SYSTEM) },
+                label = { Text("System") }
+            )
+            FilterChip(
+                selected = themeMode == ThemeMode.LIGHT,
+                onClick = { onThemeChange(ThemeMode.LIGHT) },
+                label = { Text("Light") }
+            )
+            FilterChip(
+                selected = themeMode == ThemeMode.DARK,
+                onClick = { onThemeChange(ThemeMode.DARK) },
+                label = { Text("Dark") }
+            )
         }
 
         Spacer(Modifier.weight(1f))

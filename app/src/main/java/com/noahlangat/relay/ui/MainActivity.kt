@@ -41,6 +41,7 @@ import com.noahlangat.relay.ui.theme.RelayAppTheme
 import dagger.hilt.android.AndroidEntryPoint
 import timber.log.Timber
 import javax.inject.Inject
+import com.noahlangat.relay.data.PrimaryMode
 import com.noahlangat.relay.service.RelayService
 import com.noahlangat.relay.ui.components.SettingsScreen
 
@@ -107,7 +108,8 @@ class MainActivity : ComponentActivity() {
 }
 
  setContent {
-    RelayAppTheme {
+                val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    RelayAppTheme(themeMode = themeMode) {
                 var settingsOpen by remember { mutableStateOf(false) }
                 var telemetryOpen by remember { mutableStateOf(false) }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -116,6 +118,8 @@ class MainActivity : ComponentActivity() {
                         primaryMode = uiState.primaryMode,
                         primaryHost = uiState.primaryHost,
                         primaryPort = uiState.primaryPort,
+                        themeMode = themeMode,
+                        onThemeChange = { viewModel.setThemeMode(it) },
                         onApply = { mode, host, port ->
                             viewModel.applyPrimarySettings(mode, host, port)
                             // Auto-restart the relay so the new primary takes effect.
@@ -305,24 +309,26 @@ fun MainScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            ConnectionPanel(
-                connectedDevices = uiState.connectedDevices,
-                serverPort = uiState.serverPort,
-                clientInfo = uiState.clientInfo,
-                isDiscovering = uiState.isDiscovering,
-                onDeviceSelect = { deviceId -> viewModel.selectDevice(deviceId) },
-                onPortChange = { port -> viewModel.updatePort(port) },
-                onConnect = { viewModel.connectToDevice() },
-                onDisconnect = { viewModel.disconnectFromDevice() },
-                onRefresh = { viewModel.refreshDevices() },
-                onConnectAll = { viewModel.connectToAllDevices() },
-                onDisconnectAll = { viewModel.disconnectFromAllDevices() },
-                selectedDeviceId = uiState.selectedDeviceId
-            )
+            val sourceActive = uiState.connectedDevices.any { it.isConnected }
+            val sinkActive = uiState.clientInfo != null
+            val sinkLabel = if (uiState.primaryMode == PrimaryMode.CLIENT) "WiFi" else "WiFi listen"
+            val sinkDetail = if (uiState.primaryMode == PrimaryMode.CLIENT) {
+                if (uiState.primaryHost.isBlank()) "not set" else "${uiState.primaryHost}:${uiState.primaryPort}"
+            } else {
+                "port ${uiState.primaryPort}"
+            }
 
-            LogViewer(
-                logMessages = uiState.logMessages,
-                onClearLogs = { viewModel.clearLogMessages() }
+            RelayTopologyCard(
+                isRunning = uiState.isServiceRunning,
+                currentHz = uiState.currentHz,
+                packets = uiState.packetsTransmitted,
+                sourceLabel = "Bluetooth",
+                sourceDetail = uiState.connectedDevices.firstOrNull { it.isConnected }?.name
+                    ?: "No controller",
+                sourceActive = sourceActive,
+                sinkLabel = sinkLabel,
+                sinkDetail = sinkDetail,
+                sinkActive = sinkActive
             )
 
             ServiceControlPanel(
@@ -331,9 +337,19 @@ fun MainScreen(
                 onStopService = onStopService
             )
 
-            // Quick Actions
-            QuickActionsPanel(
-                onViewProtocolDocs = { /* Protocol docs not implemented */ }
+            ConnectionPanel(
+                connectedDevices = uiState.connectedDevices,
+                isDiscovering = uiState.isDiscovering,
+                onDeviceSelect = { deviceId -> viewModel.selectDevice(deviceId) },
+                onConnect = { viewModel.connectToDevice() },
+                onDisconnect = { viewModel.disconnectFromDevice() },
+                onRefresh = { viewModel.refreshDevices() },
+                selectedDeviceId = uiState.selectedDeviceId
+            )
+
+            LogViewer(
+                logMessages = uiState.logMessages,
+                onClearLogs = { viewModel.clearLogMessages() }
             )
         }
     }

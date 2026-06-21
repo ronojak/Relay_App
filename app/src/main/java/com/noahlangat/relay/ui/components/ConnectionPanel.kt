@@ -12,27 +12,23 @@ import androidx.compose.ui.unit.dp
 import com.noahlangat.relay.R
 import com.noahlangat.relay.bluetooth.BluetoothManager
 
+/**
+ * Controller (input) selection: pick a Bluetooth gamepad and connect/disconnect it.
+ * Network/primary configuration lives in Settings; this panel is input-only.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConnectionPanel(
     connectedDevices: List<BluetoothManager.GamepadDevice>,
-    serverPort: String,
-    clientInfo: String?,
     isDiscovering: Boolean = false,
     onDeviceSelect: (Int) -> Unit,
-    onPortChange: (String) -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onRefresh: () -> Unit = {},
-    onConnectAll: () -> Unit = {},
-    onDisconnectAll: () -> Unit = {},
     selectedDeviceId: Int? = null,
     modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
+    Card(modifier = modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -42,10 +38,7 @@ fun ConnectionPanel(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Connection",
-                    style = MaterialTheme.typography.titleMedium
-                )
+                Text(text = "Controller", style = MaterialTheme.typography.titleMedium)
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -56,17 +49,8 @@ fun ConnectionPanel(
                             modifier = Modifier.size(16.dp),
                             strokeWidth = 2.dp
                         )
-                        Text(
-                            text = "Discovering...",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
                     }
-
-                    IconButton(
-                        onClick = onRefresh,
-                        modifier = Modifier.size(32.dp)
-                    ) {
+                    IconButton(onClick = onRefresh, modifier = Modifier.size(32.dp)) {
                         Icon(
                             Icons.Default.Refresh,
                             contentDescription = "Refresh devices",
@@ -76,7 +60,6 @@ fun ConnectionPanel(
                 }
             }
 
-            // Bluetooth Device Selection
             var expanded by remember { mutableStateOf(false) }
             val selectedDevice = connectedDevices.find { it.id == selectedDeviceId }
 
@@ -128,37 +111,6 @@ fun ConnectionPanel(
                 }
             }
 
-            // Network Settings - Make port OutlinedTextField read-only and disabled
-            OutlinedTextField(
-                value = serverPort,
-                onValueChange = {}, // disabled
-                label = { Text("Listening port") },
-                readOnly = true,
-                enabled = false,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            // Client Info and Connection Status
-            val connectedCount = connectedDevices.count { it.isConnected }
-            val totalCount = connectedDevices.size
-
-            Column {
-                Text(
-                    text = clientInfo ?: stringResource(R.string.no_client_connected),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                if (totalCount > 0) {
-                    Text(
-                        text = "Devices: $connectedCount/$totalCount connected",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (connectedCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            // Individual Device Connection Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -177,30 +129,6 @@ fun ConnectionPanel(
                     enabled = selectedDevice?.isConnected == true
                 ) {
                     Text("Disconnect")
-                }
-            }
-
-            // Bulk Connection Buttons
-            if (totalCount > 1) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = onConnectAll,
-                        modifier = Modifier.weight(1f),
-                        enabled = connectedCount < totalCount
-                    ) {
-                        Text("Connect All")
-                    }
-
-                    OutlinedButton(
-                        onClick = onDisconnectAll,
-                        modifier = Modifier.weight(1f),
-                        enabled = connectedCount > 0
-                    ) {
-                        Text("Disconnect All")
-                    }
                 }
             }
         }

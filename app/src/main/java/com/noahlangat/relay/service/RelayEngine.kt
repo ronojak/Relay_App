@@ -2,9 +2,13 @@ package com.noahlangat.relay.service
 
 import com.noahlangat.relay.bluetooth.BluetoothManager
 import com.noahlangat.relay.bluetooth.GamepadInputHandler
-import com.noahlangat.relay.network.TcpServer
 import com.noahlangat.relay.protocol.GamepadState
 import com.noahlangat.relay.protocol.MessageSerializer
+import com.noahlangat.relay.transport.BluetoothHidSource
+import com.noahlangat.relay.transport.LinkState
+import com.noahlangat.relay.transport.SinkTransport
+import com.noahlangat.relay.transport.SourceTransport
+import com.noahlangat.relay.transport.TcpServerSink
 import com.noahlangat.relay.ui.components.LogLevel
 import com.noahlangat.relay.ui.components.LogMessage
 import com.noahlangat.relay.ui.components.LogSource
@@ -13,28 +17,34 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import timber.log.Timber
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Owns the core relay pipeline: pulls gamepad input from the [GamepadInputHandler]
- * (secondary / input source) and pushes serialized frames to the [TcpServer]
- * (primary / output sink), while exposing observable state, stats and logs.
+ * Owns the core relay pipeline: pulls input frames from the active
+ * [SourceTransport] (secondary / input) and pushes serialized frames to the
+ * active [SinkTransport] (primary / output), while exposing observable state,
+ * stats and logs.
  *
- * This was extracted out of [RelayService] so the foreground service is only
- * responsible for the Android lifecycle and notification, and the relay logic
- * can later be re-pointed at swappable transports (see roadmap).
+ * The engine talks only to the transport interfaces, so the concrete links can
+ * later be swapped at runtime (see roadmap). For now the assignment is fixed:
+ * Bluetooth gamepad in, WiFi TCP server out.
  */
 @Singleton
 class RelayEngine @Inject constructor(
-    private val bluetoothManager: BluetoothManager,
-    private val gamepadInputHandler: GamepadInputHandler
+    bluetoothManager: BluetoothManager,
+    gamepadInputHandler: GamepadInputHandler
 ) {
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    /** Single TCP server (primary/output). Created once for the engine's lifetime. */
-    private val tcpServer = TcpServer(scope = scope)
+    // Fixed transport assignment for now; Phase 3 makes these reassignable.
+    private val source: SourceTransport = BluetoothHidSource(bluetoothManager, gamepadInputHandler)
+    private val sink: SinkTransport = TcpServerSink(scope)
+
+    /** Monotonic protocol sequence number (was previously owned by the TCP server). */
+    private val sequence = AtomicInteger(0)
 
     /** Everything spawned by [start]; cancelled wholesale by [stop]. */
     private var runJob: Job? = null
@@ -90,9 +100,10 @@ class RelayEngine @Inject constructor(
             try {
                 Timber.i("Starting gamepad relay")
 
-                if (!tcpServer.start()) {
-                    throw IllegalStateException("Failed to start TCP server")
+                if (!sink.start()) {
+                    throw IllegalStateException("Failed to start ${sink.displayName}")
                 }
+                source.start(this)
 
                 _state.value = State.RUNNING
                 updateStats { it.copy(uptime = System.currentTimeMillis()) }
@@ -113,17 +124,22 @@ class RelayEngine @Inject constructor(
                     source = LogSource.GAMEPAD
                 )
 
-                // Forward log messages emitted by GamepadInputHandler.
+                // Forward transport-specific log events.
+                launch { source.logs.collect { appendLog(it) } }
+                launch { sink.logs.collect { appendLog(it) } }
+
+                // Map transport state into engine stats.
+                launch { source.activeInputs.collect { count -> updateStats { it.copy(connectedDevices = count) } } }
                 launch {
-                    gamepadInputHandler.logMessageFlow.collect { logMessage ->
-                        appendLog(logMessage)
+                    sink.state.collect { linkState ->
+                        updateStats { it.copy(networkClients = if (linkState == LinkState.ACTIVE) 1 else 0) }
                     }
                 }
 
-                // Track the latest gamepad state and log inputs as they arrive.
+                // Track the latest input frame and log inputs as they arrive.
                 val latestGamepadState = MutableStateFlow<GamepadState?>(null)
                 launch {
-                    gamepadInputHandler.gamepadStateFlow.collectLatest { gamepadState ->
+                    source.frames.collectLatest { gamepadState ->
                         latestGamepadState.value = gamepadState
                         val buttonInfo = getButtonInfo(gamepadState)
                         val inputMessage = if (buttonInfo.isNotEmpty()) {
@@ -150,9 +166,9 @@ class RelayEngine @Inject constructor(
                                 val currentTime = System.currentTimeMillis()
                                 val message = MessageSerializer.serializeGamepadMessage(
                                     gamepadState,
-                                    tcpServer.getNextSequenceNumber()
+                                    sequence.incrementAndGet()
                                 )
-                                val success = tcpServer.broadcastGamepadState(message)
+                                val success = sink.send(message)
                                 if (success) {
                                     updateStats { stats ->
                                         stats.copy(
@@ -193,7 +209,26 @@ class RelayEngine @Inject constructor(
                     }
                 }
 
-                startMonitoringLoops()
+                // Periodically refresh simulated stats while running.
+                launch {
+                    while (isActive && _state.value == State.RUNNING) {
+                        val currentStats = _stats.value
+                        if (currentStats.connectedDevices > 0 && currentStats.networkClients > 0) {
+                            val currentTime = System.currentTimeMillis()
+                            if (currentTime - currentStats.lastPacketTime > 5000) {
+                                updateStats { stats ->
+                                    stats.copy(
+                                        packetsRelayed = stats.packetsRelayed + 1,
+                                        currentHz = 60.0f,
+                                        lastPacketTime = currentTime,
+                                        averageLatency = 12.5f + (Math.random() * 5).toFloat()
+                                    )
+                                }
+                            }
+                        }
+                        delay(1000)
+                    }
+                }
 
             } catch (e: CancellationException) {
                 throw e
@@ -214,7 +249,8 @@ class RelayEngine @Inject constructor(
         _state.value = State.STOPPING
         runJob?.cancel()
         runJob = null
-        scope.launch { tcpServer.stop() }
+        source.stop()
+        scope.launch { sink.stop() }
         _state.value = State.STOPPED
 
         addLogMessage(
@@ -235,84 +271,10 @@ class RelayEngine @Inject constructor(
         Timber.i("RelayEngine shut down")
     }
 
-    fun getCurrentClientInfo(): String? = tcpServer.getCurrentClientInfo()
-
-    private fun CoroutineScope.startMonitoringLoops() {
-        // Monitor Bluetooth devices (secondary/input).
-        launch {
-            var previousDeviceCount = 0
-            bluetoothManager.connectedDevices.collect { devices ->
-                updateStats { it.copy(connectedDevices = devices.size) }
-
-                if (devices.size != previousDeviceCount) {
-                    if (devices.size > previousDeviceCount) {
-                        devices.takeLast(devices.size - previousDeviceCount).forEach { device ->
-                            addLogMessage(
-                                message = "Bluetooth device connected",
-                                level = LogLevel.INFO,
-                                deviceName = device.name,
-                                deviceId = device.id,
-                                source = LogSource.BLUETOOTH
-                            )
-                        }
-                    } else {
-                        addLogMessage(
-                            message = "${previousDeviceCount - devices.size} Bluetooth device(s) disconnected",
-                            level = LogLevel.INFO,
-                            source = LogSource.BLUETOOTH
-                        )
-                    }
-                    previousDeviceCount = devices.size
-                }
-            }
-        }
-
-        // Monitor network connection (primary/output).
-        launch {
-            var previousClientConnected = false
-            tcpServer.serverState.collect { serverState ->
-                val clientConnected = serverState == TcpServer.ServerState.CLIENT_CONNECTED
-                updateStats { it.copy(networkClients = if (clientConnected) 1 else 0) }
-
-                if (clientConnected != previousClientConnected) {
-                    addLogMessage(
-                        message = if (clientConnected) {
-                            "Network client connected to TCP server"
-                        } else {
-                            "Network client disconnected from TCP server"
-                        },
-                        level = LogLevel.INFO,
-                        source = LogSource.NETWORK
-                    )
-                    previousClientConnected = clientConnected
-                }
-            }
-        }
-
-        // Periodically refresh simulated stats while running.
-        launch {
-            while (isActive && _state.value == State.RUNNING) {
-                val currentStats = _stats.value
-                if (currentStats.connectedDevices > 0 && currentStats.networkClients > 0) {
-                    val currentTime = System.currentTimeMillis()
-                    if (currentTime - currentStats.lastPacketTime > 5000) {
-                        updateStats { stats ->
-                            stats.copy(
-                                packetsRelayed = stats.packetsRelayed + 1,
-                                currentHz = 60.0f,
-                                lastPacketTime = currentTime,
-                                averageLatency = 12.5f + (Math.random() * 5).toFloat()
-                            )
-                        }
-                    }
-                }
-                delay(1000)
-            }
-        }
-    }
+    fun getCurrentClientInfo(): String? = sink.peerInfo
 
     private fun calculateLatency(): Float {
-        return if (tcpServer.serverState.value == TcpServer.ServerState.CLIENT_CONNECTED) {
+        return if (sink.state.value == LinkState.ACTIVE) {
             5.0f + (Math.random() * 10).toFloat()
         } else {
             0.0f

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- App Info -->
-    <string name="app_name">Relay App</string>
+    <string name="app_name">Relay</string>
     <string name="app_description">Gamepad TCP Bridge Service</string>
     <string name="version">v1.0.0-beta</string>
     

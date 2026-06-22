@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.noahlangat.relay.R
 import com.noahlangat.relay.bluetooth.BluetoothManager
@@ -38,7 +39,11 @@ fun ConnectionPanel(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(text = "Controller", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = "Controller",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

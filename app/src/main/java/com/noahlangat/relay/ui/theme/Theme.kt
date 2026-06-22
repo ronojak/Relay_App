@@ -1,11 +1,14 @@
 package com.noahlangat.relay.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import com.noahlangat.relay.data.ThemeMode
 
 private val Blue = Color(0xFF2962FF)
@@ -49,6 +52,15 @@ private val LightColorScheme = lightColorScheme(
     onError = Color.White,
 )
 
+// Generously rounded shape scale (cards, sheets, buttons inherit from these).
+private val AppShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(28.dp),
+)
+
 @Composable
 fun RelayAppTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
@@ -64,6 +76,7 @@ fun RelayAppTheme(
     MaterialTheme(
         colorScheme = colorScheme,
         typography = Typography,
+        shapes = AppShapes,
         content = content
     )
 }

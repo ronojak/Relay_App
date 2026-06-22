@@ -4,10 +4,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.noahlangat.relay.R
 
 @Composable
 fun ServiceControlPanel(
@@ -51,20 +49,6 @@ fun ServiceControlPanel(
                     ) {
                         Text("Start Service")
                     }
-                }
-            }
-            
-            if (isServiceRunning) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
-                ) {
-                    Text(
-                        text = "✅ Relay service is active and running in background",
-                        modifier = Modifier.padding(12.dp),
-                        style = MaterialTheme.typography.bodyMedium
-                    )
                 }
             }
         }
